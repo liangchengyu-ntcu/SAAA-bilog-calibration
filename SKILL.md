@@ -65,9 +65,34 @@ The runner natively includes **Option 5 (Prescan & Skip)** automated protection 
 
 Pass `--prescan=off` if you want to bypass prescan and force unconstrained calibration.
 
+## Batch calibration workflow (全科 / 批次校準作業流程)
+
+When the user asks to "run all subjects" (跑全科), "run batch calibration" (批次校準), or process an entire folder:
+
+1. **Auto-Discovery & Pairing**:
+   - The runner automatically discovers all student response screening workbooks matching `[Year]_[Subject]_*.xlsx` (e.g. `115_C3_篩選結果.xlsx`, `116_M5_篩選結果.xlsx`).
+   - Automatically pairs each subject with its domain answer workbook (`*_C_*.xlsx`, `*_M_*.xlsx`, `*_E_*.xlsx`, `*_S_*.xlsx`).
+2. **Batch Execution**:
+   - Executes single-pass calibration for all subjects with Option 5 (Prescan & Skip) automated protection.
+3. **Master Consolidated Output**:
+   - Produces `[Year]年_全學科全學年_IRT參數總表.xlsx` (contains individual sheets for each subject `C03`, `M05`, `E04`, `S05`... plus a `全科摘要總表` sheet).
+   - Produces `[Year]年_全學科全學年_IRT試題參數詳細診斷總表.xlsx` (contains all items across all subjects with full CTT/IRT diagnostics).
+
 ## Commands
 
-3PL model (standard command):
+All subjects batch mode (auto-discover all subjects in directory):
+
+```bash
+Rscript scripts/easy_bilog_runner.R --batch --model=3PL
+```
+
+Batch mode for specific year / directory:
+
+```bash
+Rscript scripts/easy_bilog_runner.R --batch-dir="C:/path/to/data" --year=116 --model=3PL
+```
+
+Single subject (3PL standard command):
 
 ```bash
 Rscript scripts/easy_bilog_runner.R DATA.xlsx ANSWERS.xlsx --model=3PL

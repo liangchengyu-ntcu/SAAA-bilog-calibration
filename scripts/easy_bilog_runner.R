@@ -958,14 +958,157 @@ run_bilog_auto <- function(data_file,
 }
 
 # ==============================================================================
+# Batch Auto-Discovery & Calibration
+# ==============================================================================
+run_bilog_batch <- function(batch_dir        = ".",
+                            model            = NULL,
+                            mode             = "auto",
+                            prescan          = "auto",
+                            bilog_exe_folder = NULL,
+                            exam_year        = NULL) {
+  batch_start_time <- Sys.time()
+
+  if (is.null(model) || trimws(as.character(model)) == "") {
+    stop(paste0(
+      "\u5c1a\u672a\u6307\u5b9a IRT \u6a21\u578b\u3002\n",
+      "\u8acb\u660e\u78ba\u50b3\u5165 --model=1PL\u3001--model=2PL \u6216 --model=3PL\u3002\n",
+      "\u6a21\u578b\u9078\u64c7\u662f\u5206\u6790\u6c7a\u7b56\uff0c\u4e0d\u61c9\u7531\u7cfb\u7d71\u9ed8\u9ed8\u66ff\u60a8\u6c7a\u5b9a\u3002"
+    ))
+  }
+  model <- toupper(trimws(model))
+
+  abs_batch_dir <- normalizePath(batch_dir, winslash = "/", mustWork = TRUE)
+  all_files     <- list.files(abs_batch_dir, pattern = "\\.xlsx$", full.names = FALSE)
+
+  # Find student screening files: e.g. 115_C3_篩選結果.xlsx, 116_M5_篩選結果.xlsx
+  data_files <- grep("^[0-9]{3}_[A-Za-z]+[0-9]+.*\\.xlsx$", all_files, value = TRUE)
+  data_files <- data_files[!grepl("IRT|\u7e3d\u8868|\u6bd4\u5c0d|summary|result", data_files, ignore.case = TRUE)]
+
+  if (length(data_files) == 0) {
+    stop(sprintf("\u5728\u76ee\u9304 %s \u4e2d\u672a\u627e\u5230\u7b26\u5408 SAAA \u683c\u5f0f\u7684\u5b78\u751f\u4f5c\u7b54\u7be9\u9078\u6a94 (\u7bc4\u4f8b: 115_M5_\u7be9\u9078\u7d50\u679c.xlsx)", abs_batch_dir))
+  }
+
+  # Find answer files: e.g. 115_C_ans_final.xlsx, 116_M_ans_final.xlsx, *_ans*.xlsx
+  ans_files <- grep("ans|\u7b54\u6848", all_files, value = TRUE, ignore.case = TRUE)
+  ans_files <- ans_files[!grepl("\u7be9\u9078|\u4f5c\u7b54|IRT|\u7e3d\u8868|\u6bd4\u5c0d", ans_files, ignore.case = TRUE)]
+
+  cat("==============================================================================\n")
+  cat(sprintf("\U0001f680 SAAA-bilog-calibration \u5168\u79d1\u6279\u6b21\u81ea\u52d5\u5316\u6821\u6e96\u5f15\u64ce (\u6a21\u578b: %s)\n", model))
+  cat(sprintf("\U0001f4c2 \u5de5\u4f5c\u76ee\u9304: %s\n", abs_batch_dir))
+  cat(sprintf("\U0001f4ca \u627e\u5230 %d \u7d44 SAAA \u5b78\u79d1\u5f85\u6821\u6e96\u6a94\u6848\n", length(data_files)))
+  cat("==============================================================================\n\n")
+
+  official_sheets    <- list()
+  full_reports_list  <- list()
+  batch_summary_list <- list()
+
+  data_files <- sort(data_files)
+
+  for (i in seq_along(data_files)) {
+    df_name <- data_files[i]
+    df_path <- file.path(abs_batch_dir, df_name)
+
+    meta      <- infer_metadata(df_path, exam_year = exam_year)
+    yr        <- meta$year
+    subj      <- meta$subject
+    subj_char <- meta$subject_char
+    subj_pad  <- meta$subject_pad
+
+    # Match domain answer file by subject letter prefix
+    matched_ans <- grep(sprintf("(_|^)%s(_|ans|\\.xlsx)", subj_char), ans_files, value = TRUE, ignore.case = TRUE)
+    if (length(matched_ans) == 0) {
+      matched_ans <- grep(subj_char, ans_files, value = TRUE, ignore.case = TRUE)
+    }
+    if (length(matched_ans) == 0) {
+      warning(sprintf("\u627e\u4e0d\u5230\u5b78\u79d1 %s (\u9818\u57df: %s) \u7684\u7b54\u6848\u6a94\uff0c\u8df3\u904e\u6b64\u79d1\u76ee\u3002", subj, subj_char))
+      next
+    }
+    ans_path <- file.path(abs_batch_dir, matched_ans[1])
+
+    cat(sprintf("[%02d/%02d] \u6b63\u5728\u6821\u6e96: %s (\u4f5c\u7b54: %s | \u7b54\u6848: %s) ...\n",
+                i, length(data_files), subj, df_name, matched_ans[1]))
+
+    subj_out_dir <- file.path(abs_batch_dir, sprintf("%s_%s_%s_BILOG_Results", yr, subj, model))
+
+    res <- tryCatch(
+      run_bilog_auto(
+        data_file        = df_path,
+        ans_file         = ans_path,
+        output_dir       = subj_out_dir,
+        bilog_exe_folder = bilog_exe_folder,
+        exam_year        = yr,
+        subject_code     = subj,
+        mode             = mode,
+        model            = model,
+        prescan          = prescan
+      ),
+      error = function(e) {
+        cat(sprintf("\u274c \u6821\u6e96\u5931\u6557 (%s): %s\n", subj, conditionMessage(e)))
+        NULL
+      }
+    )
+
+    if (!is.null(res) && res$status == "completed") {
+      official_sheets[[subj_pad]] <- res$official_df
+      full_rep <- res$full_report
+      full_rep$學科代碼 <- subj
+      full_rep$年級代碼 <- subj_pad
+      cols_ordered <- c("學科代碼", "年級代碼", setdiff(names(full_rep), c("學科代碼", "年級代碼")))
+      full_reports_list[[subj_pad]] <- full_rep[, cols_ordered, drop = FALSE]
+
+      batch_summary_list[[length(batch_summary_list) + 1]] <- data.frame(
+        學科代碼 = subj,
+        科目年級 = subj_pad,
+        試題數 = nrow(res$official_df),
+        模型 = model,
+        狀態 = "\u2705 \u5b8c\u6210",
+        stringsAsFactors = FALSE
+      )
+    }
+    cat("\n")
+  }
+
+  # Consolidated Master Excel Workbook
+  if (length(official_sheets) > 0) {
+    first_yr <- if (!is.null(exam_year)) exam_year else infer_metadata(file.path(abs_batch_dir, data_files[1]))$year
+    master_official_path <- file.path(abs_batch_dir, sprintf("%s\u5e74_\u5168\u5b78\u79d1\u5168\u5b78\u5e74_IRT\u53c3\u6578\u7e3d\u8868.xlsx", first_yr))
+
+    if (length(batch_summary_list) > 0) {
+      summary_all_df  <- do.call(rbind, batch_summary_list)
+      official_sheets <- c(list("全科摘要總表" = summary_all_df), official_sheets)
+    }
+    write_xlsx(official_sheets, master_official_path)
+
+    if (length(full_reports_list) > 0) {
+      all_full_df <- do.call(rbind, full_reports_list)
+      master_detailed_path <- file.path(abs_batch_dir, sprintf("%s\u5e74_\u5168\u5b78\u79d1\u5168\u5b78\u5e74_IRT\u8a66\u984c\u53c3\u6578\u8a73\u7d30\u8a3a\u65b7\u7e3d\u8868.xlsx", first_yr))
+      write_xlsx(list("全卷試題詳細總表" = all_full_df), master_detailed_path)
+    }
+
+    total_batch_time <- round(as.numeric(difftime(Sys.time(), batch_start_time, units = "mins")), 2)
+    cat("==============================================================================\n")
+    cat(sprintf("\U0001f389 \u5168\u79d1\u6279\u6b21\u6821\u6e96\u5b8c\u6210\uff01\u5171\u6210\u529f\u6821\u6e96 %d \u500b\u5b78\u79d1\uff0c\u7e3d\u8017\u6642: %.2f \u5206\u9418\n",
+                length(official_sheets) - 1, total_batch_time))
+    cat(sprintf("\U0001f4ca \u5b98\u65b9\u53c3\u6578\u7e3d\u8868 (\u5404\u79d1\u5206\u9801): %s\n", master_official_path))
+    if (exists("master_detailed_path")) cat(sprintf("\U0001f4cb \u8a73\u7d30\u8a3a\u65b7\u7e3d\u8868 (\u5168\u984c\u5f59\u6574): %s\n", master_detailed_path))
+    cat("==============================================================================\n")
+  }
+}
+
+# ==============================================================================
 # CLI
 # ==============================================================================
 print_usage <- function() {
   cat(paste0(
     "Usage:\n",
-    "  Rscript easy_bilog_runner.R <data.xlsx> <answers.xlsx> [options]\n\n",
+    "  # Single subject:\n",
+    "  Rscript easy_bilog_runner.R <data.xlsx> <answers.xlsx> --model=3PL [options]\n\n",
+    "  # All subjects batch mode (auto-discover all subjects in directory):\n",
+    "  Rscript easy_bilog_runner.R --batch --model=3PL [options]\n\n",
     "Options (use --key=value):\n",
     "  --model=3PL|2PL|1PL         IRT model (REQUIRED: 1PL, 2PL, or 3PL)\n",
+    "  --batch                     Run batch calibration on all subjects in current folder\n",
+    "  --batch-dir=PATH            Directory to scan for batch calibration (default: .)\n",
     "  --prescan=auto|on|off       Prescan & skip negative biserial items (default: auto)\n",
     "  --mode=auto|prepare|run|parse  Execution mode (default: auto)\n",
     "  --output-dir=PATH           Output directory (default: auto-named with model)\n",
@@ -974,6 +1117,7 @@ print_usage <- function() {
     "  --subject=M5                Override inferred subject/grade code\n",
     "  --help                      Show this help\n\n",
     "Examples:\n",
+    "  Rscript easy_bilog_runner.R --batch --model=3PL\n",
     "  Rscript easy_bilog_runner.R data.xlsx answers.xlsx --model=3PL\n",
     "  Rscript easy_bilog_runner.R data.xlsx answers.xlsx --model=2PL\n",
     "  Rscript easy_bilog_runner.R data.xlsx answers.xlsx --model=1PL --mode=prepare\n\n",
@@ -1003,25 +1147,43 @@ parse_cli <- function(args) {
 
 args <- commandArgs(trailingOnly = TRUE)
 cli  <- parse_cli(args)
+
 if (isTRUE(cli$options$help)) {
   print_usage()
-} else if (length(cli$positional) >= 2) {
+} else {
   get_opt <- function(name, default = NULL) {
     x <- cli$options[[name]]
     if (is.null(x) || identical(x, "")) default else x
   }
-  run_bilog_auto(
-    data_file        = cli$positional[1],
-    ans_file         = cli$positional[2],
-    output_dir       = get_opt("output-dir"),
-    bilog_exe_folder = get_opt("bilog-dir"),
-    exam_year        = get_opt("year"),
-    subject_code     = get_opt("subject"),
-    mode             = get_opt("mode", "auto"),
-    model            = get_opt("model", NULL),
-    prescan          = get_opt("prescan", "auto")
-  )
-} else if (!interactive()) {
-  print_usage()
-  quit(status = 2)
+
+  is_batch <- isTRUE(cli$options$batch) || !is.null(cli$options[["batch-dir"]])
+
+  if (is_batch) {
+    # Batch execution mode
+    run_bilog_batch(
+      batch_dir        = get_opt("batch-dir", "."),
+      model            = get_opt("model", NULL),
+      mode             = get_opt("mode", "auto"),
+      prescan          = get_opt("prescan", "auto"),
+      bilog_exe_folder = get_opt("bilog-dir"),
+      exam_year        = get_opt("year")
+    )
+  } else if (length(cli$positional) >= 2) {
+    # Single subject mode
+    run_bilog_auto(
+      data_file        = cli$positional[1],
+      ans_file         = cli$positional[2],
+      output_dir       = get_opt("output-dir"),
+      bilog_exe_folder = get_opt("bilog-dir"),
+      exam_year        = get_opt("year"),
+      subject_code     = get_opt("subject"),
+      mode             = get_opt("mode", "auto"),
+      model            = get_opt("model", NULL),
+      prescan          = get_opt("prescan", "auto")
+    )
+  } else if (!interactive()) {
+    print_usage()
+    quit(status = 2)
+  }
 }
+

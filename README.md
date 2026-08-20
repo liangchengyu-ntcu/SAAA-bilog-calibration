@@ -32,20 +32,20 @@
 ### 快速上手
 
 ```bash
-# 執行 3PL 三參數校準（預設推薦）
+# 全科批次自動校準（自動掃描目錄下所有 SAAA 作答檔與答案檔，一鍵跑完全部學科並產出總表）
+Rscript scripts/easy_bilog_runner.R --batch --model=3PL
+
+# 單一科目 3PL 三參數校準
 Rscript scripts/easy_bilog_runner.R DATA.xlsx ANSWERS.xlsx --model=3PL
 
-# 執行 2PL 二參數校準（c 固定為 0，官方報表僅輸出 a, b, 點二）
+# 單一科目 2PL 二參數校準（c 固定為 0，官方報表僅輸出 a, b, 點二）
 Rscript scripts/easy_bilog_runner.R DATA.xlsx ANSWERS.xlsx --model=2PL
 
-# 執行 1PL 單參數校準（a 為共同斜率，官方報表僅輸出 b, 點二）
+# 單一科目 1PL 單參數校準（a 為共同斜率，官方報表僅輸出 b, 點二）
 Rscript scripts/easy_bilog_runner.R DATA.xlsx ANSWERS.xlsx --model=1PL
 
 # 使用範例資料測試
 Rscript scripts/easy_bilog_runner.R examples/sample_data.xlsx examples/sample_answers.xlsx --subject=M5 --year=115 --model=3PL --mode=auto
-
-# 指定 BILOG-MG 安裝目錄完整執行
-Rscript scripts/easy_bilog_runner.R DATA.xlsx ANSWERS.xlsx --model=3PL --mode=run --bilog-dir="C:/Program Files/BILOGMG"
 ```
 
 ### 安裝為 AI Agent 技能
