@@ -32,14 +32,20 @@
 ### 快速上手
 
 ```bash
-# 預設自動模式（有 BILOG 執行檔就直接跑，沒有就準備原生檔案）
-Rscript scripts/easy_bilog_runner.R DATA.xlsx ANSWERS.xlsx
+# 執行 3PL 三參數校準（預設推薦）
+Rscript scripts/easy_bilog_runner.R DATA.xlsx ANSWERS.xlsx --model=3PL
+
+# 執行 2PL 二參數校準（c 固定為 0，官方報表僅輸出 a, b, 點二）
+Rscript scripts/easy_bilog_runner.R DATA.xlsx ANSWERS.xlsx --model=2PL
+
+# 執行 1PL 單參數校準（a 為共同斜率，官方報表僅輸出 b, 點二）
+Rscript scripts/easy_bilog_runner.R DATA.xlsx ANSWERS.xlsx --model=1PL
 
 # 使用範例資料測試
-Rscript scripts/easy_bilog_runner.R examples/sample_data.xlsx examples/sample_answers.xlsx --subject=M5 --year=115 --mode=prepare
+Rscript scripts/easy_bilog_runner.R examples/sample_data.xlsx examples/sample_answers.xlsx --subject=M5 --year=115 --model=3PL --mode=auto
 
 # 指定 BILOG-MG 安裝目錄完整執行
-Rscript scripts/easy_bilog_runner.R DATA.xlsx ANSWERS.xlsx --mode=run --bilog-dir="C:/Program Files/BILOGMG"
+Rscript scripts/easy_bilog_runner.R DATA.xlsx ANSWERS.xlsx --model=3PL --mode=run --bilog-dir="C:/Program Files/BILOGMG"
 ```
 
 ### 安裝為 AI Agent 技能

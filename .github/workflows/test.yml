@@ -34,6 +34,7 @@ jobs:
             examples/sample_answers.xlsx \
             --subject=M5 \
             --year=115 \
+            --model=3PL \
             --mode=prepare \
             --output-dir=ci_test_output
 
