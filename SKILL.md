@@ -1,9 +1,9 @@
 ---
-name: bilog-calibration
-description: Run and diagnose BILOG-MG 3PL item calibration using the bundled R workflow as the single source of truth. Use when the user provides student-response and answer/dimension Excel workbooks and asks to validate BILOG inputs, prepare native DAT/OMITKEY/BLM files, execute BLM1/BLM2/BLM3 on a Windows host, parse PAR/PH1 outputs, generate the official five-column IRT parameter workbook, produce detailed CTT/IRT reports, diagnose BILOG failures, or continue a calibration run externally. Preserve original item numbers after unscored items are removed. Never replace the R/BILOG computation with a Python reimplementation.
+name: SAAA-bilog-calibration
+description: 縣市學生能力檢測 (SAAA) BILOG-MG 3PL 試題參數估計與品質診斷專用 Skill。自動化執行學生作答與答案/向度 Excel 預檢、生成標準 DAT/OMITKEY/BLM 原生檔、呼叫 BLM1/BLM2/BLM3 執行校準、解析 PAR/PH1 輸出、產出公務標準五欄 IRT 參數表與 16 欄 CTT/IRT 詳細報表。
 ---
 
-# BILOG-MG 3PL Calibration
+# SAAA-bilog-calibration 縣市學生能力檢測 bilog 試題參數估計
 
 Use `scripts/easy_bilog_runner.R` as the only calibration engine. Treat its behavior and outputs as authoritative for this Skill.
 

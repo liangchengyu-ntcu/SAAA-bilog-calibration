@@ -1,6 +1,8 @@
 interface:
-  display_name: BILOG-MG Calibration
-  short_description: R-first BILOG-MG 3PL calibration, parsing, QC, and reporting
+  display_name: SAAA 縣市學生能力檢測 BILOG 試題參數估計
+  short_description: 縣市學生能力檢測 BILOG-MG 3PL 試題參數估計與品質診斷報表
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
 policy:
   products:
   - chatgpt
