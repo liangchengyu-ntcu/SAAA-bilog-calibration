@@ -1,7 +1,8 @@
 #!/usr/bin/env Rscript
 
-# BILOG-MG 3PL calibration runner.
+# BILOG-MG IRT Calibration runner: supports 1PL, 2PL, and 3PL models.
 # Uses only readxl/writexl in addition to base R.
+# Pass --model=1PL|2PL|3PL (default: 3PL).
 
 required_packages <- c("readxl", "writexl")
 missing_packages <- required_packages[!vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)]
@@ -18,33 +19,34 @@ suppressPackageStartupMessages({
   library(writexl)
 })
 
-COL_ABSENT <- "\u7f3a\u8003"
-COL_INVALID <- "\u7121\u6548"
-COL_SERIAL <- "\u7e3d\u6d41\u6c34\u865f"
-COL_ITEM_NO <- "\u984c\u865f"
-COL_ITEM_CODE <- "\u8a66\u984c\u4ee3\u78bc"
+COL_ABSENT     <- "\u7f3a\u8003"
+COL_INVALID    <- "\u7121\u6548"
+COL_SERIAL     <- "\u7e3d\u6d41\u6c34\u865f"
+COL_ITEM_NO    <- "\u984c\u865f"
+COL_ITEM_CODE  <- "\u8a66\u984c\u4ee3\u78bc"
 COL_STD_ANSWER <- "\u6a19\u6e96\u7b54\u6848"
-COL_PASS_RATE <- "\u901a\u904e\u7387(P\u503c)"
-COL_CITC <- "\u6821\u6b63\u5f8c\u8a66\u984c\u7e3d\u5206\u76f8\u95dc(CITC)"
-COL_CORE_DIM <- "\u6838\u5fc3\u5167\u5bb9\u5411\u5ea6"
-COL_COG_DIM <- "\u8a8d\u77e5\u6b77\u7a0b\u5411\u5ea6"
-COL_ALT_DIM <- "\u8a55\u91cf\u6307\u6a19\u5411\u5ea6"
-COL_A <- "\u9451\u5225\u5ea6(a)"
-COL_B <- "\u96e3\u5ea6(b)"
-COL_C <- "\u731c\u6e2c\u5ea6(c)"
-COL_PBIS <- "\u9ede\u4e8c\u7cfb\u5217\u76f8\u95dc(PBIS)"
-COL_BIS <- "\u4e8c\u7cfb\u5217\u76f8\u95dc(BIS)"
-COL_POINT_BIS <- "\u9ede\u4e8c\u76f8\u95dc"
-COL_SE_A <- "\u9451\u5225\u5ea6\u6a19\u6e96\u8aa4(SE_a)"
-COL_SE_B <- "\u96e3\u5ea6\u6a19\u6e96\u8aa4(SE_b)"
-COL_SE_C <- "\u731c\u6e2c\u5ea6\u6a19\u6e96\u8aa4(SE_c)"
-COL_QC <- "\u54c1\u8cea\u6aa2\u6838"
-SHEET_ANSWER <- "\u7b54\u6848"
+COL_PASS_RATE  <- "\u901a\u904e\u7387(P\u503c)"
+COL_CITC       <- "\u6821\u6b63\u5f8c\u8a66\u984c\u7e3d\u5206\u76f8\u95dc(CITC)"
+COL_CORE_DIM   <- "\u6838\u5fc3\u5167\u5bb9\u5411\u5ea6"
+COL_COG_DIM    <- "\u8a8d\u77e5\u6b77\u7a0b\u5411\u5ea6"
+COL_ALT_DIM    <- "\u8a55\u91cf\u6307\u6a19\u5411\u5ea6"
+COL_MODEL      <- "\u6a21\u578b"
+COL_A          <- "\u9451\u5225\u5ea6(a)"
+COL_B          <- "\u96e3\u5ea6(b)"
+COL_C          <- "\u731c\u6e2c\u5ea6(c)"
+COL_PBIS       <- "\u9ede\u4e8c\u7cfb\u5217\u76f8\u95dc(PBIS)"
+COL_BIS        <- "\u4e8c\u7cfb\u5217\u76f8\u95dc(BIS)"
+COL_POINT_BIS  <- "\u9ede\u4e8c\u76f8\u95dc"
+COL_SE_A       <- "\u9451\u5225\u5ea6\u6a19\u6e96\u8aa4(SE_a)"
+COL_SE_B       <- "\u96e3\u5ea6\u6a19\u6e96\u8aa4(SE_b)"
+COL_SE_C       <- "\u731c\u6e2c\u5ea6\u6a19\u6e96\u8aa4(SE_c)"
+COL_QC         <- "\u54c1\u8cea\u6aa2\u6838"
+SHEET_ANSWER   <- "\u7b54\u6848"
 SHEET_DIM_CODE <- "\u8a55\u91cf\u6307\u6a19\u4ee3"
-SHEET_DIM <- "\u5411\u5ea6"
+SHEET_DIM      <- "\u5411\u5ea6"
 SHEET_OFFICIAL <- "\u5de5\u4f5c\u88681"
-SHEET_FULL <- "BILOG\u8a66\u984c\u53c3\u6578\u8207\u53e4\u5178\u6307\u6a19\u7e3d\u8868"
-SHEET_SUMMARY <- "\u8a66\u984c\u53c3\u6578\u63cf\u8ff0\u6027\u7d71\u8a08"
+SHEET_FULL     <- "BILOG\u8a66\u984c\u53c3\u6578\u8207\u53e4\u5178\u6307\u6a19\u7e3d\u8868"
+SHEET_SUMMARY  <- "\u8a66\u984c\u53c3\u6578\u63cf\u8ff0\u6027\u7d71\u8a08"
 
 as_scalar_chr <- function(x) {
   if (is.null(x) || length(x) == 0 || is.na(x[1]) || trimws(as.character(x[1])) == "") return(NULL)
@@ -54,7 +56,7 @@ as_scalar_chr <- function(x) {
 infer_metadata <- function(data_file, exam_year = NULL, subject_code = NULL) {
   base <- basename(data_file)
   subject_code <- as_scalar_chr(subject_code)
-  exam_year <- as_scalar_chr(exam_year)
+  exam_year    <- as_scalar_chr(exam_year)
 
   if (is.null(subject_code)) {
     m <- regmatches(base, regexec("([A-Za-z]+[0-9]+)", base, perl = TRUE))[[1]]
@@ -69,9 +71,9 @@ infer_metadata <- function(data_file, exam_year = NULL, subject_code = NULL) {
   sm <- regmatches(subject_code, regexec("^([A-Za-z]+)([0-9]+)$", subject_code, perl = TRUE))[[1]]
   if (length(sm) < 3) stop("Subject code must contain letters followed by a grade number (example: M5).")
   subject_char <- toupper(sm[2])
-  grade_num <- as.integer(sm[3])
+  grade_num    <- as.integer(sm[3])
   if (is.na(grade_num)) stop("Invalid grade number in subject code.")
-  subject_pad <- sprintf("%s%02d", subject_char, grade_num)
+  subject_pad  <- sprintf("%s%02d", subject_char, grade_num)
 
   if (is.null(exam_year)) {
     ym <- regmatches(base, regexec("^([0-9]{3})[_-]", base, perl = TRUE))[[1]]
@@ -82,11 +84,8 @@ infer_metadata <- function(data_file, exam_year = NULL, subject_code = NULL) {
   }
 
   list(
-    year = exam_year,
-    subject = subject_code,
-    subject_char = subject_char,
-    grade = grade_num,
-    subject_pad = subject_pad
+    year = exam_year, subject = subject_code,
+    subject_char = subject_char, grade = grade_num, subject_pad = subject_pad
   )
 }
 
@@ -100,7 +99,7 @@ normalize_subject_header <- function(x) {
 }
 
 choose_answer_column <- function(ans_df, subject) {
-  nms <- names(ans_df)
+  nms   <- names(ans_df)
   exact <- which(normalize_subject_header(nms) == normalize_subject_header(subject))
   if (length(exact) >= 1) return(exact[1])
   if (ncol(ans_df) >= 2) {
@@ -118,7 +117,7 @@ extract_dimensions <- function(ans_file, sheets, item_nums, subject, grade_num) 
   out <- data.frame(
     item_num = item_nums,
     core_dim = rep(NA_character_, length(item_nums)),
-    cog_dim = rep(NA_character_, length(item_nums)),
+    cog_dim  = rep(NA_character_, length(item_nums)),
     stringsAsFactors = FALSE
   )
   if (length(sheets) < 2) return(out)
@@ -135,30 +134,26 @@ extract_dimensions <- function(ans_file, sheets, item_nums, subject, grade_num) 
   if (!(COL_ITEM_NO %in% names(raw))) raw[[COL_ITEM_NO]] <- seq_len(nrow(raw))
 
   raw_item <- suppressWarnings(as.integer(raw[[COL_ITEM_NO]]))
-  idx <- match(item_nums, raw_item)
+  idx      <- match(item_nums, raw_item)
   dim_cols <- names(raw)
   subject_cols <- dim_cols[grepl(toupper(subject), toupper(dim_cols), fixed = TRUE)]
 
   grade_map <- c(
-    "3" = "\u4e09\u5e74\u7d1a",
-    "4" = "\u56db\u5e74\u7d1a",
-    "5" = "\u4e94\u5e74\u7d1a",
-    "6" = "\u516d\u5e74\u7d1a",
-    "7" = "\u4e03\u5e74\u7d1a",
-    "8" = "\u516b\u5e74\u7d1a"
+    "3" = "\u4e09\u5e74\u7d1a", "4" = "\u56db\u5e74\u7d1a", "5" = "\u4e94\u5e74\u7d1a",
+    "6" = "\u516d\u5e74\u7d1a", "7" = "\u4e03\u5e74\u7d1a", "8" = "\u516b\u5e74\u7d1a"
   )
   grade_name <- unname(grade_map[as.character(grade_num)])
 
   copy_col <- function(col_name) {
     vals <- rep(NA_character_, length(item_nums))
-    ok <- !is.na(idx)
+    ok   <- !is.na(idx)
     vals[ok] <- as.character(raw[[col_name]][idx[ok]])
     vals
   }
 
   if (length(subject_cols) >= 2) {
     out$core_dim <- copy_col(subject_cols[1])
-    out$cog_dim <- copy_col(subject_cols[2])
+    out$cog_dim  <- copy_col(subject_cols[2])
   } else if (length(subject_cols) == 1) {
     out$core_dim <- copy_col(subject_cols[1])
   } else if (length(grade_name) == 1 && !is.na(grade_name) && grade_name %in% dim_cols) {
@@ -195,39 +190,109 @@ safe_stat <- function(x, fun) {
   fun(x, na.rm = TRUE)
 }
 
-parse_par_file <- function(path, n_items) {
+# ------------------------------------------------------------------------------
+# PAR file parser — supports nparm = 1, 2, or 3
+# ------------------------------------------------------------------------------
+parse_par_file <- function(path, n_items, nparm = 3) {
   lines <- readLines(path, warn = FALSE)
   if (length(lines) <= 4) stop(sprintf("PAR file is too short: %s", path))
   candidates <- lines[5:length(lines)]
-  records <- list()
+  records    <- list()
 
-  for (line in candidates) {
-    parts <- unlist(strsplit(trimws(line), "[[:space:]]+"))
-    if (length(parts) < 12) next
-    main_vals <- suppressWarnings(as.numeric(parts[c(5, 7, 11)]))
-    if (any(is.na(main_vals))) next
-    vals <- suppressWarnings(as.numeric(parts[c(5, 6, 7, 8, 11, 12)]))
-    records[[length(records) + 1]] <- vals
-    if (length(records) == n_items) break
-  }
+  if (nparm == 3) {
+    # 3PL: each item line has a, se_a, b, se_b, ..., c, se_c at positions 5,6,7,8,11,12
+    for (line in candidates) {
+      parts <- unlist(strsplit(trimws(line), "[[:space:]]+"))
+      if (length(parts) < 12) next
+      main_vals <- suppressWarnings(as.numeric(parts[c(5, 7, 11)]))
+      if (any(is.na(main_vals))) next
+      vals <- suppressWarnings(as.numeric(parts[c(5, 6, 7, 8, 11, 12)]))
+      records[[length(records) + 1]] <- vals
+      if (length(records) == n_items) break
+    }
+    if (length(records) < n_items) {
+      stop(sprintf("Could parse only %d/%d item rows from PAR file (3PL): %s", length(records), n_items, path))
+    }
+    out <- do.call(rbind, records)
+    colnames(out) <- c("a", "se_a", "b", "se_b", "c", "se_c")
 
-  if (length(records) < n_items) {
-    stop(sprintf("Could parse only %d/%d item rows from PAR file: %s", length(records), n_items, path))
+  } else if (nparm == 2) {
+    # 2PL: a, se_a, b, se_b at positions 5,6,7,8; c is fixed at 0 (not in PAR)
+    for (line in candidates) {
+      parts <- unlist(strsplit(trimws(line), "[[:space:]]+"))
+      if (length(parts) < 8) next
+      main_vals <- suppressWarnings(as.numeric(parts[c(5, 7)]))
+      if (any(is.na(main_vals))) next
+      vals <- suppressWarnings(as.numeric(parts[c(5, 6, 7, 8)]))
+      records[[length(records) + 1]] <- vals
+      if (length(records) == n_items) break
+    }
+    if (length(records) < n_items) {
+      stop(sprintf("Could parse only %d/%d item rows from PAR file (2PL): %s", length(records), n_items, path))
+    }
+    out_raw <- do.call(rbind, records)
+    out <- cbind(out_raw, c = 0, se_c = NA_real_)
+    colnames(out) <- c("a", "se_a", "b", "se_b", "c", "se_c")
+
+  } else {
+    # 1PL (NPARM=1): BILOG-MG outputs a full 3PL-like row per item, but:
+    #   position 5 = common slope a (same for all items)
+    #   position 6 = se_a (common)
+    #   position 7 = per-item difficulty b (Rasch scale)
+    #   position 8 = se_b
+    #   positions 9-14 = 0.00000 (unused c parameters)
+    # Verified from actual BILOG-MG NPARM=1 PAR output.
+    common_a    <- NA_real_
+    common_se_a <- NA_real_
+
+    for (line in candidates) {
+      parts <- unlist(strsplit(trimws(line), "[[:space:]]+"))
+      if (length(parts) < 8) next
+      a_candidate  <- suppressWarnings(as.numeric(parts[5]))
+      b_candidate  <- suppressWarnings(as.numeric(parts[7]))
+      if (is.na(a_candidate) || is.na(b_candidate)) next
+
+      # Common a is identical across all rows — capture it from the first valid row
+      if (is.na(common_a)) {
+        common_a    <- a_candidate
+        common_se_a <- suppressWarnings(as.numeric(parts[6]))
+      }
+      se_b_val <- suppressWarnings(as.numeric(parts[8]))
+      records[[length(records) + 1]] <- c(b_candidate, if (!is.na(se_b_val)) se_b_val else NA_real_)
+      if (length(records) == n_items) break
+    }
+    if (length(records) < n_items) {
+      warning(sprintf(
+        "1PL PAR: could parse only %d/%d item b values from: %s. Remaining will be NA.",
+        length(records), n_items, path
+      ))
+    }
+    n_parsed <- length(records)
+    out <- matrix(NA_real_, n_items, 6)
+    colnames(out) <- c("a", "se_a", "b", "se_b", "c", "se_c")
+    if (n_parsed > 0) {
+      b_mat <- do.call(rbind, records)
+      out[seq_len(n_parsed), "b"]    <- b_mat[, 1]
+      out[seq_len(n_parsed), "se_b"] <- b_mat[, 2]
+    }
+    out[, "a"]   <- common_a     # common slope — same for all items
+    out[, "se_a"] <- common_se_a
+    out[, "c"]   <- 0             # fixed at 0 in 1PL
+    attr(out, "common_a")    <- common_a
+    attr(out, "common_se_a") <- common_se_a
   }
-  out <- do.call(rbind, records)
-  colnames(out) <- c("a", "se_a", "b", "se_b", "c", "se_c")
   out
 }
 
 parse_ph1_file <- function(path, n_items) {
   pbis <- rep(NA_real_, n_items)
-  bis <- rep(NA_real_, n_items)
+  bis  <- rep(NA_real_, n_items)
   if (!file.exists(path)) {
     warning(sprintf("PH1 file not found; PBIS/BIS will be NA: %s", path))
     return(list(pbis = pbis, bis = bis))
   }
 
-  lines <- readLines(path, warn = FALSE)
+  lines  <- readLines(path, warn = FALSE)
   header <- grep("ITEM\\s+NAME\\s+#TRIED\\s+#RIGHT\\s+PCT\\s+LOGIT\\s+PEARSON\\s+BISERIAL", lines)
   if (length(header) == 0) {
     warning("PH1 statistics table header not found; PBIS/BIS will be NA.")
@@ -237,10 +302,10 @@ parse_ph1_file <- function(path, n_items) {
   rec <- list()
   if (header[1] < length(lines)) {
     for (line in lines[(header[1] + 1):length(lines)]) {
-      parts <- unlist(strsplit(trimws(line), "[[:space:]]+"))
+      parts      <- unlist(strsplit(trimws(line), "[[:space:]]+"))
       if (length(parts) < 8) next
       item_index <- suppressWarnings(as.numeric(parts[1]))
-      vals <- suppressWarnings(as.numeric(parts[c(7, 8)]))
+      vals       <- suppressWarnings(as.numeric(parts[c(7, 8)]))
       if (is.na(item_index) || any(is.na(vals))) next
       rec[[length(rec) + 1]] <- vals
       if (length(rec) == n_items) break
@@ -252,9 +317,9 @@ parse_ph1_file <- function(path, n_items) {
   }
   if (length(rec) > 0) {
     mat <- do.call(rbind, rec)
-    n <- min(nrow(mat), n_items)
+    n   <- min(nrow(mat), n_items)
     pbis[seq_len(n)] <- mat[seq_len(n), 1]
-    bis[seq_len(n)] <- mat[seq_len(n), 2]
+    bis[seq_len(n)]  <- mat[seq_len(n), 2]
   }
   list(pbis = pbis, bis = bis)
 }
@@ -267,12 +332,12 @@ write_run_summary <- function(path, entries) {
 read_run_summary <- function(path) {
   if (!file.exists(path)) return(list())
   lines <- readLines(path, warn = FALSE)
-  out <- list()
+  out   <- list()
   for (line in lines) {
     pos <- regexpr("=", line, fixed = TRUE)[1]
     if (is.na(pos) || pos < 1) next
-    key <- substr(line, 1, pos - 1)
-    value <- substr(line, pos + 1, nchar(line))
+    key        <- substr(line, 1, pos - 1)
+    value      <- substr(line, pos + 1, nchar(line))
     out[[key]] <- value
   }
   out
@@ -283,8 +348,8 @@ file_md5 <- function(path) {
 }
 
 run_bilog_stages <- function(bilog_exe_folder, blm_prefix, output_dir) {
-  stages <- c("BLM1.EXE", "BLM2.EXE", "BLM3.EXE")
-  exes <- file.path(bilog_exe_folder, stages)
+  stages  <- c("BLM1.EXE", "BLM2.EXE", "BLM3.EXE")
+  exes    <- file.path(bilog_exe_folder, stages)
   missing <- stages[!file.exists(exes)]
   if (length(missing) > 0) stop(sprintf("Missing BILOG executable(s): %s", paste(missing, collapse = ", ")))
 
@@ -295,7 +360,7 @@ run_bilog_stages <- function(bilog_exe_folder, blm_prefix, output_dir) {
   elapsed <- system.time({
     for (i in seq_along(exes)) {
       log_path <- file.path(output_dir, sprintf("%s.log", tools::file_path_sans_ext(stages[i])))
-      status <- tryCatch(
+      status   <- tryCatch(
         system2(exes[i], args = blm_prefix, stdout = log_path, stderr = log_path),
         error = function(e) structure(999L, message = conditionMessage(e))
       )
@@ -309,35 +374,46 @@ run_bilog_stages <- function(bilog_exe_folder, blm_prefix, output_dir) {
   unname(elapsed["elapsed"])
 }
 
+# ==============================================================================
+# Main calibration function
+# ==============================================================================
 run_bilog_auto <- function(data_file,
                            ans_file,
-                           output_dir = NULL,
+                           output_dir       = NULL,
                            bilog_exe_folder = NULL,
-                           exam_year = NULL,
-                           subject_code = NULL,
-                           mode = "auto") {
+                           exam_year        = NULL,
+                           subject_code     = NULL,
+                           mode             = "auto",
+                           model            = "3PL") {
   start_time <- Sys.time()
-  mode <- tolower(mode)
+  mode  <- tolower(trimws(mode))
+  model <- toupper(trimws(model))
   if (!(mode %in% c("auto", "prepare", "run", "parse"))) {
     stop("mode must be one of: auto, prepare, run, parse")
   }
+  nparm <- switch(model,
+    "1PL" = 1L,
+    "2PL" = 2L,
+    "3PL" = 3L,
+    stop("model \u5fc5\u9808\u70ba 1PL\u30012PL \u6216 3PL")
+  )
   if (!file.exists(data_file)) stop(sprintf("Data file not found: %s", data_file))
-  if (!file.exists(ans_file)) stop(sprintf("Answer file not found: %s", ans_file))
+  if (!file.exists(ans_file))  stop(sprintf("Answer file not found: %s", ans_file))
 
-  meta <- infer_metadata(data_file, exam_year, subject_code)
-  exam_year <- meta$year
-  subject <- meta$subject
-  grade_num <- meta$grade
+  meta        <- infer_metadata(data_file, exam_year, subject_code)
+  exam_year   <- meta$year
+  subject     <- meta$subject
+  grade_num   <- meta$grade
   subject_pad <- meta$subject_pad
 
   if (is.null(output_dir) || trimws(output_dir) == "") {
-    output_dir <- sprintf("%s_%s_BILOG_Results", exam_year, subject)
+    output_dir <- sprintf("%s_%s_%s_BILOG_Results", exam_year, subject, model)
   }
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
   abs_output_dir <- normalizePath(output_dir, winslash = "/", mustWork = TRUE)
-  summary_path <- file.path(abs_output_dir, "BILOG_RUN_SUMMARY.txt")
-  data_md5 <- file_md5(data_file)
-  answer_md5 <- file_md5(ans_file)
+  summary_path   <- file.path(abs_output_dir, "BILOG_RUN_SUMMARY.txt")
+  data_md5       <- file_md5(data_file)
+  answer_md5     <- file_md5(ans_file)
 
   if (mode == "parse") {
     prior <- read_run_summary(summary_path)
@@ -359,72 +435,82 @@ run_bilog_auto <- function(data_file,
 
   cat(sprintf("Input data: %s\n", data_file))
   cat(sprintf("Answer file: %s\n", ans_file))
-  cat(sprintf("Exam year: %s | subject: %s | normalized: %s\n", exam_year, subject, subject_pad))
+  cat(sprintf("Exam year: %s | subject: %s | normalized: %s | model: %s (NPARM=%d)\n",
+              exam_year, subject, subject_pad, model, nparm))
   cat(sprintf("Output directory: %s\n", abs_output_dir))
 
-  sheets <- excel_sheets(ans_file)
+  # ---------------------------------------------------------------------------
+  # Read answer file
+  # ---------------------------------------------------------------------------
+  sheets         <- excel_sheets(ans_file)
   if (length(sheets) == 0) stop("Answer workbook has no sheets.")
   answer_matches <- grep(SHEET_ANSWER, sheets, fixed = TRUE, value = TRUE)
-  answer_sheet <- if (length(answer_matches) > 0) answer_matches[1] else sheets[1]
-  ans_df <- read_excel(ans_file, sheet = answer_sheet)
+  answer_sheet   <- if (length(answer_matches) > 0) answer_matches[1] else sheets[1]
+  ans_df         <- read_excel(ans_file, sheet = answer_sheet)
   if (nrow(ans_df) == 0 || ncol(ans_df) == 0) stop("Answer sheet is empty.")
-  ans_col <- choose_answer_column(ans_df, subject)
-  raw_answers <- ans_df[[ans_col]]
-  answer_chars <- trimws(as.character(raw_answers))
+  ans_col        <- choose_answer_column(ans_df, subject)
+  raw_answers    <- ans_df[[ans_col]]
+  answer_chars   <- trimws(as.character(raw_answers))
   valid_item_idx <- which(!is.na(raw_answers) & !is.na(answer_chars) & answer_chars != "" & answer_chars != "\u4e0d\u4e88\u8a08\u5206")
   if (length(valid_item_idx) < 2) stop("Fewer than 2 scorable items were found in the answer column.")
-  item_nums <- valid_item_idx
-  n_items <- length(item_nums)
+  item_nums  <- valid_item_idx
+  n_items    <- length(item_nums)
   std_answers <- as.character(raw_answers[item_nums])
 
   dim_info <- extract_dimensions(ans_file, sheets, item_nums, subject, grade_num)
 
+  # ---------------------------------------------------------------------------
+  # Read student data
+  # ---------------------------------------------------------------------------
   raw_students <- read_excel(data_file)
   if (nrow(raw_students) == 0) stop("Student workbook has no rows.")
   valid_mask <- rep(TRUE, nrow(raw_students))
   if (all(c(COL_ABSENT, COL_INVALID) %in% names(raw_students))) {
-    absent <- suppressWarnings(as.numeric(raw_students[[COL_ABSENT]]))
+    absent  <- suppressWarnings(as.numeric(raw_students[[COL_ABSENT]]))
     invalid <- suppressWarnings(as.numeric(raw_students[[COL_INVALID]]))
     valid_mask <- !is.na(absent) & !is.na(invalid) & absent == 0 & invalid == 0
   } else {
     warning("Absent/invalid columns were not both present; no students were filtered on those flags.")
   }
   valid_students <- raw_students[valid_mask, , drop = FALSE]
-  source_rows <- which(valid_mask)
-  n_valid <- nrow(valid_students)
+  source_rows    <- which(valid_mask)
+  n_valid        <- nrow(valid_students)
   if (n_valid < 3) stop("Fewer than 3 valid students remain after filtering.")
 
-  q_cols <- paste0("Q", item_nums)
+  q_cols    <- paste0("Q", item_nums)
   missing_q <- setdiff(q_cols, names(valid_students))
   if (length(missing_q) > 0) stop(sprintf("Missing response column(s): %s", paste(missing_q, collapse = ", ")))
 
-  q_char <- do.call(cbind, lapply(q_cols, function(nm) normalize_response_column(valid_students[[nm]], nm)))
+  q_char   <- do.call(cbind, lapply(q_cols, function(nm) normalize_response_column(valid_students[[nm]], nm)))
   colnames(q_char) <- q_cols
-  num_mat <- matrix(as.numeric(q_char), nrow = n_valid, ncol = n_items, dimnames = list(NULL, q_cols))
-  num_mat_clean <- num_mat
+  num_mat  <- matrix(as.numeric(q_char), nrow = n_valid, ncol = n_items, dimnames = list(NULL, q_cols))
+  num_mat_clean      <- num_mat
   num_mat_clean[num_mat_clean == 9] <- NA_real_
-  p_values <- colMeans(num_mat_clean, na.rm = TRUE)
+  p_values           <- colMeans(num_mat_clean, na.rm = TRUE)
 
   item_rest_corr <- vapply(seq_len(n_items), function(j) {
     other <- num_mat_clean[, -j, drop = FALSE]
-    rest <- rowSums(other, na.rm = TRUE)
+    rest  <- rowSums(other, na.rm = TRUE)
     rest[rowSums(!is.na(other)) == 0] <- NA_real_
     safe_cor(num_mat_clean[, j], rest)
   }, numeric(1))
 
   ctt_base <- data.frame(
-    q_code = q_cols,
-    item_num = item_nums,
-    std_answer = std_answers,
-    pass_rate = round(p_values, 4),
-    citc = round(item_rest_corr, 4),
+    q_code      = q_cols,
+    item_num    = item_nums,
+    std_answer  = std_answers,
+    pass_rate   = round(p_values, 4),
+    citc        = round(item_rest_corr, 4),
     stringsAsFactors = FALSE
   )
   ctt_base$core_dim <- dim_info$core_dim[match(item_nums, dim_info$item_num)]
-  ctt_base$cog_dim <- dim_info$cog_dim[match(item_nums, dim_info$item_num)]
+  ctt_base$cog_dim  <- dim_info$cog_dim[match(item_nums, dim_info$item_num)]
 
+  # ---------------------------------------------------------------------------
+  # Build student ID vector
+  # ---------------------------------------------------------------------------
   if (COL_SERIAL %in% names(valid_students)) {
-    raw_ids <- as.character(valid_students[[COL_SERIAL]])
+    raw_ids  <- as.character(valid_students[[COL_SERIAL]])
     id_match <- regexec(".*_([0-9]{6})$", raw_ids, perl = TRUE)
     extracted <- regmatches(raw_ids, id_match)
     ids <- vapply(extracted, function(x) if (length(x) >= 2) x[2] else NA_character_, character(1))
@@ -437,32 +523,36 @@ run_bilog_auto <- function(data_file,
   }
   if (anyDuplicated(ids)) stop("Generated/extracted six-digit IDs are not unique.")
 
-  resp_strings <- apply(q_char, 1, paste0, collapse = "")
-  data_lines <- paste0(ids, " ", resp_strings)
-  dat_filename <- sprintf("%s_data.dat", subject_pad)
-  dat_path <- file.path(abs_output_dir, dat_filename)
+  # ---------------------------------------------------------------------------
+  # Write BILOG native input files
+  # ---------------------------------------------------------------------------
+  resp_strings  <- apply(q_char, 1, paste0, collapse = "")
+  data_lines    <- paste0(ids, " ", resp_strings)
+  dat_filename  <- sprintf("%s_data.dat", subject_pad)
+  dat_path      <- file.path(abs_output_dir, dat_filename)
   writeLines(data_lines, dat_path, useBytes = TRUE)
 
   omit_filename <- "OMITKEY.dat"
-  omit_path <- file.path(abs_output_dir, omit_filename)
+  omit_path     <- file.path(abs_output_dir, omit_filename)
   writeLines(paste0(strrep(" ", 7), strrep("9", n_items)), omit_path, useBytes = TRUE)
 
-  blm_prefix <- sprintf("%s%s", exam_year, subject_pad)
-  blm_filename <- sprintf("%s.BLM", blm_prefix)
-  blm_path <- file.path(abs_output_dir, blm_filename)
-  par_filename <- sprintf("%s_IP.PAR", subject_pad)
-  sco_filename <- sprintf("%s_SCORE.SCO", subject_pad)
-  par_path <- file.path(abs_output_dir, par_filename)
-  ph1_path <- file.path(abs_output_dir, sprintf("%s.PH1", blm_prefix))
+  blm_prefix    <- sprintf("%s%s", exam_year, subject_pad)
+  blm_filename  <- sprintf("%s.BLM", blm_prefix)
+  blm_path      <- file.path(abs_output_dir, blm_filename)
+  par_filename  <- sprintf("%s_IP.PAR", subject_pad)
+  sco_filename  <- sprintf("%s_SCORE.SCO", subject_pad)
+  par_path      <- file.path(abs_output_dir, par_filename)
+  ph1_path      <- file.path(abs_output_dir, sprintf("%s.PH1", blm_prefix))
 
-  inames <- sprintf("I%03d", seq_len(n_items))
-  iname_clause <- sprintf("INAME=(%s(1)%s)", inames[1], inames[n_items])
-  format_str <- sprintf("(6A1,1X,%dA1)", n_items)
+  inames        <- sprintf("I%03d", seq_len(n_items))
+  iname_clause  <- sprintf("INAME=(%s(1)%s)", inames[1], inames[n_items])
+  format_str    <- sprintf("(6A1,1X,%dA1)", n_items)
+
   blm_content <- c(
     "",
     "",
     ">COMMENTS",
-    sprintf(">GLOBAL DFNAME='%s', NPARM=3, LOGISTIC, OMITS, SAVE;", dat_filename),
+    sprintf(">GLOBAL DFNAME='%s', NPARM=%d, LOGISTIC, OMITS, SAVE;", dat_filename, nparm),
     sprintf(">SAVE PARM='%s', SCORE='%s';", par_filename, sco_filename),
     sprintf(">LENGTH NITEMS=%d;", n_items),
     sprintf(">INPUT NTOTAL=%d, NALT=4, NIDCH=6, OFNAME='%s';", n_items, omit_filename),
@@ -477,34 +567,38 @@ run_bilog_auto <- function(data_file,
   )
   writeLines(blm_content, blm_path, useBytes = TRUE)
 
-  exe_paths <- file.path(bilog_exe_folder, c("BLM1.EXE", "BLM2.EXE", "BLM3.EXE"))
+  # ---------------------------------------------------------------------------
+  # Execute / prepare / parse logic
+  # ---------------------------------------------------------------------------
+  exe_paths       <- file.path(bilog_exe_folder, c("BLM1.EXE", "BLM2.EXE", "BLM3.EXE"))
   bilog_available <- dir.exists(bilog_exe_folder) && all(file.exists(exe_paths))
-  effective_mode <- mode
+  effective_mode  <- mode
   if (mode == "auto") {
-    # Never auto-parse an existing PAR file: it may be stale or belong to another run.
     effective_mode <- if (bilog_available) "run" else "prepare"
   }
 
   common_summary <- list(
-    requested_mode = mode,
-    effective_mode = effective_mode,
-    exam_year = exam_year,
-    subject = subject,
+    requested_mode    = mode,
+    effective_mode    = effective_mode,
+    model             = model,
+    nparm             = nparm,
+    exam_year         = exam_year,
+    subject           = subject,
     normalized_subject = subject_pad,
-    item_count = n_items,
+    item_count        = n_items,
     valid_student_count = n_valid,
-    data_file = normalizePath(data_file, winslash = "/", mustWork = TRUE),
-    answer_file = normalizePath(ans_file, winslash = "/", mustWork = TRUE),
-    data_md5 = data_md5,
-    answer_md5 = answer_md5,
-    blm_file = blm_path,
-    dat_file = dat_path,
-    omit_file = omit_path
+    data_file         = normalizePath(data_file, winslash = "/", mustWork = TRUE),
+    answer_file       = normalizePath(ans_file, winslash = "/", mustWork = TRUE),
+    data_md5          = data_md5,
+    answer_md5        = answer_md5,
+    blm_file          = blm_path,
+    dat_file          = dat_path,
+    omit_file         = omit_path
   )
 
   if (effective_mode == "prepare") {
     write_run_summary(summary_path, c(common_summary, list(status = "prepared_only", reason = "BILOG executables and PAR output are unavailable")))
-    cat("Prepared BILOG native input files only. Run BILOG-MG externally, then rerun with --mode=parse.\n")
+    cat(sprintf("Prepared BILOG native input files only (model=%s, NPARM=%d). Run BILOG-MG externally, then rerun with --mode=parse.\n", model, nparm))
     return(invisible(list(status = "prepared_only", output_dir = abs_output_dir, summary = summary_path)))
   }
 
@@ -518,129 +612,264 @@ run_bilog_auto <- function(data_file,
     stop(sprintf("PAR output not found: %s. If calibration was run elsewhere, copy the PAR/PH1 files into the output directory and use --mode=parse.", par_path))
   }
 
-  parsed <- parse_par_file(par_path, n_items)
-  ph1 <- parse_ph1_file(ph1_path, n_items)
+  # ---------------------------------------------------------------------------
+  # Parse outputs and build reports
+  # ---------------------------------------------------------------------------
+  parsed   <- parse_par_file(par_path, n_items, nparm = nparm)
+  ph1      <- parse_ph1_file(ph1_path, n_items)
   pbis_vec <- ph1$pbis
-  bis_vec <- ph1$bis
-  a_vals <- round(parsed[, "a"], 5)
-  b_vals <- round(parsed[, "b"], 5)
-  c_vals <- round(parsed[, "c"], 5)
+  bis_vec  <- ph1$bis
+
+  a_vals    <- round(parsed[, "a"],    5)
+  b_vals    <- round(parsed[, "b"],    5)
+  c_vals    <- round(parsed[, "c"],    5)
+  se_a_vals <- round(parsed[, "se_a"], 4)
+  se_b_vals <- round(parsed[, "se_b"], 4)
+  se_c_vals <- round(parsed[, "se_c"], 4)
   pbis_vals <- round(pbis_vec, 3)
   bis_vals  <- round(bis_vec, 3)
 
+  # Quality flags — depend on model
   flag_vec <- vapply(seq_len(n_items), function(i) {
     flags <- character(0)
-    if (!is.na(a_vals[i]) && a_vals[i] < 0.3) flags <- c(flags, "low discrimination (a<0.3)")
-    if (!is.na(b_vals[i]) && abs(b_vals[i]) > 5) flags <- c(flags, "extreme difficulty (|b|>5)")
-    if (!is.na(bis_vals[i]) && bis_vals[i] < 0) flags <- c(flags, "negative biserial (<0)")
+    if (nparm >= 2) {
+      if (!is.na(a_vals[i]) && a_vals[i] < 0.3)
+        flags <- c(flags, "low discrimination (a<0.3)")
+    }
+    if (!is.na(b_vals[i]) && abs(b_vals[i]) > 5)
+      flags <- c(flags, "extreme difficulty (|b|>5)")
+    if (nparm == 3) {
+      if (!is.na(c_vals[i]) && c_vals[i] > 0.5)
+        flags <- c(flags, "abnormal guessing (c>0.5)")
+    }
+    if (!is.na(bis_vals[i]) && bis_vals[i] < 0)
+      flags <- c(flags, "negative biserial (<0)")
     if (length(flags) == 0) "normal" else paste(flags, collapse = "; ")
   }, character(1))
 
-  official <- data.frame(
-    item_num = item_nums,
-    a = a_vals,
-    b = b_vals,
-    c = c_vals,
-    point_biserial = bis_vals,
-    check.names = FALSE
-  )
-  names(official) <- c(subject_pad, COL_A, COL_B, COL_C, COL_POINT_BIS)
-  official_path <- file.path(abs_output_dir, sprintf("%s_%s_IRT\u53c3\u6578.xlsx", exam_year, subject_pad))
+  # ---------------------------------------------------------------------------
+  # Official parameter table — schema varies by model
+  # ---------------------------------------------------------------------------
+  model_tag      <- model   # "1PL", "2PL", "3PL"
+  official_fname <- sprintf("%s_%s_%s_IRT\u53c3\u6578.xlsx", exam_year, subject_pad, model_tag)
+  official_path  <- file.path(abs_output_dir, official_fname)
+
+  if (nparm == 3) {
+    official <- data.frame(
+      item_num       = item_nums,
+      a              = a_vals,
+      b              = b_vals,
+      c              = c_vals,
+      point_biserial = bis_vals,
+      check.names    = FALSE
+    )
+    names(official) <- c(subject_pad, COL_A, COL_B, COL_C, COL_POINT_BIS)
+
+  } else if (nparm == 2) {
+    # c is fixed at 0 — do NOT include it as an estimated parameter column
+    official <- data.frame(
+      item_num       = item_nums,
+      a              = a_vals,
+      b              = b_vals,
+      point_biserial = bis_vals,
+      check.names    = FALSE
+    )
+    names(official) <- c(subject_pad, COL_A, COL_B, COL_POINT_BIS)
+
+  } else {
+    # 1PL: only b per item; a is a common slope (not per-item estimated)
+    official <- data.frame(
+      item_num       = item_nums,
+      b              = b_vals,
+      point_biserial = bis_vals,
+      check.names    = FALSE
+    )
+    names(official) <- c(subject_pad, COL_B, COL_POINT_BIS)
+  }
   write_xlsx(setNames(list(official), SHEET_OFFICIAL), official_path)
 
-  full_report <- data.frame(
-    q_code = ctt_base$q_code,
-    item_num = ctt_base$item_num,
-    std_answer = ctt_base$std_answer,
-    pass_rate = ctt_base$pass_rate,
-    core_dim = ctt_base$core_dim,
-    cog_dim = ctt_base$cog_dim,
-    a = round(parsed[, "a"], 4),
-    b = round(parsed[, "b"], 4),
-    c = round(parsed[, "c"], 4),
-    pbis = round(pbis_vec, 4),
-    bis = round(bis_vec, 4),
-    citc = ctt_base$citc,
-    se_a = round(parsed[, "se_a"], 4),
-    se_b = round(parsed[, "se_b"], 4),
-    se_c = round(parsed[, "se_c"], 4),
-    qc = flag_vec,
-    check.names = FALSE,
-    stringsAsFactors = FALSE
-  )
-  names(full_report) <- c(
-    COL_ITEM_CODE, COL_ITEM_NO, COL_STD_ANSWER, COL_PASS_RATE,
-    COL_CORE_DIM, COL_COG_DIM, COL_A, COL_B, COL_C,
-    COL_PBIS, COL_BIS, COL_CITC, COL_SE_A, COL_SE_B, COL_SE_C, COL_QC
+  # ---------------------------------------------------------------------------
+  # Detailed (full) report — includes model annotation row
+  # ---------------------------------------------------------------------------
+  model_note <- switch(model,
+    "3PL" = paste0("3PL (\u4e09\u53c3\u6578\u6a21\u578b): a/b/c \u5747\u70ba\u9010\u984c\u81ea\u7531\u4f30\u8a08"),
+    "2PL" = paste0("2PL (\u4e8c\u53c3\u6578\u6a21\u578b): a\u3001b \u70ba\u9010\u984c\u4f30\u8a08, c \u56fa\u5b9a\u70ba 0 (\u975e\u4f30\u8a08\u53c3\u6578)"),
+    "1PL" = paste0("1PL (\u55ae\u53c3\u6578\u6a21\u578b): b \u70ba\u9010\u984c\u4f30\u8a08, a \u70ba\u5171\u540c\u659c\u7387(\u975e\u9010\u984c), c \u56fa\u5b9a\u70ba 0 (\u975e\u4f30\u8a08\u53c3\u6578)")
   )
 
-  summary_metrics <- list(
-    "a" = full_report[[COL_A]],
-    "b" = full_report[[COL_B]],
-    "c" = full_report[[COL_C]],
-    "P" = full_report[[COL_PASS_RATE]],
-    "PBIS" = full_report[[COL_PBIS]],
-    "CITC" = full_report[[COL_CITC]]
-  )
+  # Build full_report with model column and appropriate parameter columns
+  if (nparm == 3) {
+    full_report <- data.frame(
+      q_code     = ctt_base$q_code,
+      item_num   = ctt_base$item_num,
+      model_col  = model,
+      std_answer = ctt_base$std_answer,
+      pass_rate  = ctt_base$pass_rate,
+      core_dim   = ctt_base$core_dim,
+      cog_dim    = ctt_base$cog_dim,
+      a          = round(a_vals, 4),
+      b          = round(b_vals, 4),
+      c          = round(c_vals, 4),
+      pbis       = round(pbis_vals, 4),
+      bis        = round(bis_vals, 4),
+      citc       = ctt_base$citc,
+      se_a       = se_a_vals,
+      se_b       = se_b_vals,
+      se_c       = se_c_vals,
+      qc         = flag_vec,
+      check.names = FALSE, stringsAsFactors = FALSE
+    )
+    names(full_report) <- c(
+      COL_ITEM_CODE, COL_ITEM_NO, COL_MODEL, COL_STD_ANSWER, COL_PASS_RATE,
+      COL_CORE_DIM, COL_COG_DIM, COL_A, COL_B, COL_C,
+      COL_PBIS, COL_BIS, COL_CITC, COL_SE_A, COL_SE_B, COL_SE_C, COL_QC
+    )
+  } else if (nparm == 2) {
+    c_note <- "\u56fa\u5b9a=0 (\u975e\u4f30\u8a08)"
+    full_report <- data.frame(
+      q_code     = ctt_base$q_code,
+      item_num   = ctt_base$item_num,
+      model_col  = model,
+      std_answer = ctt_base$std_answer,
+      pass_rate  = ctt_base$pass_rate,
+      core_dim   = ctt_base$core_dim,
+      cog_dim    = ctt_base$cog_dim,
+      a          = round(a_vals, 4),
+      b          = round(b_vals, 4),
+      c_fixed    = c_note,
+      pbis       = round(pbis_vals, 4),
+      bis        = round(bis_vals, 4),
+      citc       = ctt_base$citc,
+      se_a       = se_a_vals,
+      se_b       = se_b_vals,
+      qc         = flag_vec,
+      check.names = FALSE, stringsAsFactors = FALSE
+    )
+    names(full_report) <- c(
+      COL_ITEM_CODE, COL_ITEM_NO, COL_MODEL, COL_STD_ANSWER, COL_PASS_RATE,
+      COL_CORE_DIM, COL_COG_DIM, COL_A, COL_B,
+      paste0(COL_C, "(\u975e\u4f30\u8a08/\u56fa\u5b9a\u70ba0)"),
+      COL_PBIS, COL_BIS, COL_CITC, COL_SE_A, COL_SE_B, COL_QC
+    )
+  } else {
+    common_a_val <- attr(parsed, "common_a")
+    common_a_note <- if (is.na(common_a_val)) "\u5171\u540c\u659c\u7387(NA-\u8acb\u67e5 PAR)" else sprintf("\u5171\u540c\u659c\u7387=%.4f", common_a_val)
+    full_report <- data.frame(
+      q_code       = ctt_base$q_code,
+      item_num     = ctt_base$item_num,
+      model_col    = model,
+      std_answer   = ctt_base$std_answer,
+      pass_rate    = ctt_base$pass_rate,
+      core_dim     = ctt_base$core_dim,
+      cog_dim      = ctt_base$cog_dim,
+      a_note       = common_a_note,
+      b            = round(b_vals, 4),
+      c_fixed      = "\u56fa\u5b9a=0 (\u975e\u4f30\u8a08)",
+      pbis         = round(pbis_vals, 4),
+      bis          = round(bis_vals, 4),
+      citc         = ctt_base$citc,
+      se_b         = se_b_vals,
+      qc           = flag_vec,
+      check.names = FALSE, stringsAsFactors = FALSE
+    )
+    names(full_report) <- c(
+      COL_ITEM_CODE, COL_ITEM_NO, COL_MODEL, COL_STD_ANSWER, COL_PASS_RATE,
+      COL_CORE_DIM, COL_COG_DIM,
+      paste0(COL_A, "(\u5171\u540c/\u975e\u9010\u984c\u81ea\u7531\u4f30\u8a08)"),
+      COL_B,
+      paste0(COL_C, "(\u975e\u4f30\u8a08/\u56fa\u5b9a\u70ba0)"),
+      COL_PBIS, COL_BIS, COL_CITC, COL_SE_B, COL_QC
+    )
+  }
+
+  # Model summary metrics (only include estimated parameters)
+  summary_metrics <- list("b" = full_report[[COL_B]], "P" = full_report[[COL_PASS_RATE]])
+  if (nparm >= 2) summary_metrics[["a"]] <- a_vals
+  if (nparm == 3) summary_metrics[["c"]] <- c_vals
+  summary_metrics[["PBIS"]] <- round(pbis_vals, 4)
+  summary_metrics[["CITC"]] <- ctt_base$citc
+
   summary_df <- data.frame(
     metric = names(summary_metrics),
-    mean = vapply(summary_metrics, safe_stat, numeric(1), fun = mean),
-    sd = vapply(summary_metrics, safe_stat, numeric(1), fun = stats::sd),
-    min = vapply(summary_metrics, safe_stat, numeric(1), fun = min),
-    max = vapply(summary_metrics, safe_stat, numeric(1), fun = max),
+    mean   = vapply(summary_metrics, safe_stat, numeric(1), fun = mean),
+    sd     = vapply(summary_metrics, safe_stat, numeric(1), fun = stats::sd),
+    min    = vapply(summary_metrics, safe_stat, numeric(1), fun = min),
+    max    = vapply(summary_metrics, safe_stat, numeric(1), fun = max),
+    model_note = model_note,
     check.names = FALSE
   )
   names(summary_df) <- c(
-    "\u53c3\u6578\u6307\u6a19", "\u5e73\u5747\u6578", "\u6a19\u6e96\u5dee", "\u6700\u5c0f\u503c", "\u6700\u5927\u503c"
+    "\u53c3\u6578\u6307\u6a19", "\u5e73\u5747\u6578", "\u6a19\u6e96\u5dee", "\u6700\u5c0f\u503c", "\u6700\u5927\u503c",
+    "\u6a21\u578b\u8aaa\u660e"
   )
 
-  full_path <- file.path(abs_output_dir, sprintf("%s_BILOG_3PL_\u8a66\u984c\u53c3\u6578\u7e3d\u8868.xlsx", subject))
+  full_fname <- sprintf("%s_BILOG_%s_\u8a66\u984c\u53c3\u6578\u7e3d\u8868.xlsx", subject, model_tag)
+  full_path  <- file.path(abs_output_dir, full_fname)
   write_xlsx(setNames(list(full_report, summary_df), c(SHEET_FULL, SHEET_SUMMARY)), full_path)
-  csv_path <- file.path(abs_output_dir, sprintf("%s_BILOG_3PL_\u8a66\u984c\u53c3\u6578\u7e3d\u8868.csv", subject))
+
+  csv_fname <- sprintf("%s_BILOG_%s_\u8a66\u984c\u53c3\u6578\u7e3d\u8868.csv", subject, model_tag)
+  csv_path  <- file.path(abs_output_dir, csv_fname)
   write.csv(full_report, csv_path, row.names = FALSE, fileEncoding = "UTF-8")
 
   total_time <- round(as.numeric(difftime(Sys.time(), start_time, units = "secs")), 2)
   write_run_summary(summary_path, c(common_summary, list(
-    status = "completed",
-    official_excel = official_path,
-    full_excel = full_path,
-    csv = csv_path,
-    par_file = par_path,
-    ph1_file = ph1_path,
+    status          = "completed",
+    official_excel  = official_path,
+    full_excel      = full_path,
+    csv             = csv_path,
+    par_file        = par_path,
+    ph1_file        = ph1_path,
     elapsed_seconds = total_time
   )))
 
-  cat(sprintf("Completed %s (%d items, %d valid students) in %.2f seconds.\n", subject, n_items, n_valid, total_time))
-  cat(sprintf("Official five-column workbook: %s\n", official_path))
+  cat(sprintf("Completed %s model=%s (%d items, %d valid students) in %.2f seconds.\n",
+              subject, model, n_items, n_valid, total_time))
+  cat(sprintf("Official workbook: %s\n", official_path))
   cat(sprintf("Detailed workbook: %s\n", full_path))
-  invisible(list(status = "completed", official_df = official, full_report = full_report, summary = summary_df, output_dir = abs_output_dir))
+  invisible(list(
+    status      = "completed",
+    model       = model,
+    nparm       = nparm,
+    official_df = official,
+    full_report = full_report,
+    summary     = summary_df,
+    output_dir  = abs_output_dir
+  ))
 }
 
+# ==============================================================================
+# CLI
+# ==============================================================================
 print_usage <- function() {
   cat(paste0(
     "Usage:\n",
     "  Rscript easy_bilog_runner.R <data.xlsx> <answers.xlsx> [options]\n\n",
     "Options (use --key=value):\n",
-    "  --mode=auto|prepare|run|parse   Default: auto (run if BILOG exists; otherwise prepare)\n",
-    "  --output-dir=PATH               Output directory\n",
-    "  --bilog-dir=PATH                Folder containing BLM1.EXE/BLM2.EXE/BLM3.EXE\n",
-    "  --year=115                      Override inferred exam year\n",
-    "  --subject=M5                    Override inferred subject/grade code\n",
-    "  --help                          Show this help\n\n",
+    "  --model=3PL|2PL|1PL         IRT model (default: 3PL)\n",
+    "  --mode=auto|prepare|run|parse  Execution mode (default: auto)\n",
+    "  --output-dir=PATH           Output directory (default: auto-named with model)\n",
+    "  --bilog-dir=PATH            Folder containing BLM1.EXE/BLM2.EXE/BLM3.EXE\n",
+    "  --year=115                  Override inferred exam year\n",
+    "  --subject=M5                Override inferred subject/grade code\n",
+    "  --help                      Show this help\n\n",
+    "Examples:\n",
+    "  Rscript easy_bilog_runner.R data.xlsx answers.xlsx\n",
+    "  Rscript easy_bilog_runner.R data.xlsx answers.xlsx --model=2PL\n",
+    "  Rscript easy_bilog_runner.R data.xlsx answers.xlsx --model=1PL --mode=prepare\n\n",
     "Environment:\n",
     "  BILOGMG_HOME can provide the BILOG executable folder.\n"
   ))
 }
 
 parse_cli <- function(args) {
-  pos <- character(0)
+  pos  <- character(0)
   opts <- list()
   for (a in args) {
     if (a %in% c("-h", "--help")) {
       opts$help <- TRUE
     } else if (startsWith(a, "--")) {
       raw <- substring(a, 3)
-      kv <- strsplit(raw, "=", fixed = TRUE)[[1]]
+      kv  <- strsplit(raw, "=", fixed = TRUE)[[1]]
       key <- kv[1]
       val <- if (length(kv) >= 2) paste(kv[-1], collapse = "=") else "true"
       opts[[key]] <- val
@@ -652,7 +881,7 @@ parse_cli <- function(args) {
 }
 
 args <- commandArgs(trailingOnly = TRUE)
-cli <- parse_cli(args)
+cli  <- parse_cli(args)
 if (isTRUE(cli$options$help)) {
   print_usage()
 } else if (length(cli$positional) >= 2) {
@@ -661,13 +890,14 @@ if (isTRUE(cli$options$help)) {
     if (is.null(x) || identical(x, "")) default else x
   }
   run_bilog_auto(
-    data_file = cli$positional[1],
-    ans_file = cli$positional[2],
-    output_dir = get_opt("output-dir"),
+    data_file        = cli$positional[1],
+    ans_file         = cli$positional[2],
+    output_dir       = get_opt("output-dir"),
     bilog_exe_folder = get_opt("bilog-dir"),
-    exam_year = get_opt("year"),
-    subject_code = get_opt("subject"),
-    mode = get_opt("mode", "auto")
+    exam_year        = get_opt("year"),
+    subject_code     = get_opt("subject"),
+    mode             = get_opt("mode", "auto"),
+    model            = get_opt("model", "3PL")
   )
 } else if (!interactive()) {
   print_usage()
