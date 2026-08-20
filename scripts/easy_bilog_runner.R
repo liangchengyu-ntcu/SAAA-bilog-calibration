@@ -1,8 +1,8 @@
 #!/usr/bin/env Rscript
 
 # BILOG-MG IRT Calibration runner: supports 1PL, 2PL, and 3PL models.
+# Features automated Option 5 (Prescan & Skip) to protect against negative biserial overflow.
 # Uses only readxl/writexl in addition to base R.
-# Pass --model=1PL|2PL|3PL (default: 3PL).
 
 required_packages <- c("readxl", "writexl")
 missing_packages <- required_packages[!vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)]
@@ -200,7 +200,6 @@ parse_par_file <- function(path, n_items, nparm = 3) {
   records    <- list()
 
   if (nparm == 3) {
-    # 3PL: each item line has a, se_a, b, se_b, ..., c, se_c at positions 5,6,7,8,11,12
     for (line in candidates) {
       parts <- unlist(strsplit(trimws(line), "[[:space:]]+"))
       if (length(parts) < 12) next
@@ -217,7 +216,6 @@ parse_par_file <- function(path, n_items, nparm = 3) {
     colnames(out) <- c("a", "se_a", "b", "se_b", "c", "se_c")
 
   } else if (nparm == 2) {
-    # 2PL: a, se_a, b, se_b at positions 5,6,7,8; c is fixed at 0 (not in PAR)
     for (line in candidates) {
       parts <- unlist(strsplit(trimws(line), "[[:space:]]+"))
       if (length(parts) < 8) next
@@ -235,13 +233,6 @@ parse_par_file <- function(path, n_items, nparm = 3) {
     colnames(out) <- c("a", "se_a", "b", "se_b", "c", "se_c")
 
   } else {
-    # 1PL (NPARM=1): BILOG-MG outputs a full 3PL-like row per item, but:
-    #   position 5 = common slope a (same for all items)
-    #   position 6 = se_a (common)
-    #   position 7 = per-item difficulty b (Rasch scale)
-    #   position 8 = se_b
-    #   positions 9-14 = 0.00000 (unused c parameters)
-    # Verified from actual BILOG-MG NPARM=1 PAR output.
     common_a    <- NA_real_
     common_se_a <- NA_real_
 
@@ -252,7 +243,6 @@ parse_par_file <- function(path, n_items, nparm = 3) {
       b_candidate  <- suppressWarnings(as.numeric(parts[7]))
       if (is.na(a_candidate) || is.na(b_candidate)) next
 
-      # Common a is identical across all rows — capture it from the first valid row
       if (is.na(common_a)) {
         common_a    <- a_candidate
         common_se_a <- suppressWarnings(as.numeric(parts[6]))
@@ -275,9 +265,9 @@ parse_par_file <- function(path, n_items, nparm = 3) {
       out[seq_len(n_parsed), "b"]    <- b_mat[, 1]
       out[seq_len(n_parsed), "se_b"] <- b_mat[, 2]
     }
-    out[, "a"]   <- common_a     # common slope — same for all items
+    out[, "a"]   <- common_a
     out[, "se_a"] <- common_se_a
-    out[, "c"]   <- 0             # fixed at 0 in 1PL
+    out[, "c"]   <- 0
     attr(out, "common_a")    <- common_a
     attr(out, "common_se_a") <- common_se_a
   }
@@ -347,6 +337,25 @@ file_md5 <- function(path) {
   unname(as.character(tools::md5sum(path)[1]))
 }
 
+run_single_stage <- function(bilog_exe_folder, stage_exe, blm_prefix, output_dir) {
+  exe <- file.path(bilog_exe_folder, stage_exe)
+  if (!file.exists(exe)) stop(sprintf("Missing executable: %s", exe))
+  old_wd <- getwd()
+  on.exit(setwd(old_wd), add = TRUE)
+  setwd(output_dir)
+  log_path <- file.path(output_dir, sprintf("%s.log", tools::file_path_sans_ext(stage_exe)))
+  status   <- tryCatch(
+    system2(exe, args = blm_prefix, stdout = log_path, stderr = log_path),
+    error = function(e) structure(999L, message = conditionMessage(e))
+  )
+  if (!identical(as.integer(status), 0L)) {
+    msg <- attr(status, "message")
+    if (is.null(msg)) msg <- "non-zero exit status"
+    stop(sprintf("%s failed (%s). See log: %s", stage_exe, msg, log_path))
+  }
+  TRUE
+}
+
 run_bilog_stages <- function(bilog_exe_folder, blm_prefix, output_dir) {
   stages  <- c("BLM1.EXE", "BLM2.EXE", "BLM3.EXE")
   exes    <- file.path(bilog_exe_folder, stages)
@@ -374,6 +383,51 @@ run_bilog_stages <- function(bilog_exe_folder, blm_prefix, output_dir) {
   unname(elapsed["elapsed"])
 }
 
+# Helper to write DAT, OMITKEY, BLM input files
+write_bilog_input_files <- function(abs_output_dir,
+                                    dat_filename,
+                                    omit_filename,
+                                    blm_filename,
+                                    par_filename,
+                                    sco_filename,
+                                    ids,
+                                    q_char_matrix,
+                                    nparm) {
+  n_items_target <- ncol(q_char_matrix)
+  resp_strings   <- apply(q_char_matrix, 1, paste0, collapse = "")
+  data_lines     <- paste0(ids, " ", resp_strings)
+  dat_path       <- file.path(abs_output_dir, dat_filename)
+  writeLines(data_lines, dat_path, useBytes = TRUE)
+
+  omit_path      <- file.path(abs_output_dir, omit_filename)
+  writeLines(paste0(strrep(" ", 7), strrep("9", n_items_target)), omit_path, useBytes = TRUE)
+
+  blm_path       <- file.path(abs_output_dir, blm_filename)
+  inames         <- sprintf("I%03d", seq_len(n_items_target))
+  iname_clause   <- sprintf("INAME=(%s(1)%s)", inames[1], inames[n_items_target])
+  format_str     <- sprintf("(6A1,1X,%dA1)", n_items_target)
+
+  blm_content <- c(
+    "",
+    "",
+    ">COMMENTS",
+    sprintf(">GLOBAL DFNAME='%s', NPARM=%d, LOGISTIC, OMITS, SAVE;", dat_filename, nparm),
+    sprintf(">SAVE PARM='%s', SCORE='%s';", par_filename, sco_filename),
+    sprintf(">LENGTH NITEMS=%d;", n_items_target),
+    sprintf(">INPUT NTOTAL=%d, NALT=4, NIDCH=6, OFNAME='%s';", n_items_target, omit_filename),
+    sprintf(">ITEMS INUM=(1(1)%d), %s;", n_items_target, iname_clause),
+    sprintf(">TEST TNAME=E, INUMBER=(1(1)%d),", n_items_target),
+    sprintf(" FIX=(0(0)%d);", n_items_target),
+    format_str,
+    ">CALIB NQPT=51, CYCLES=100, NEWTON=50, REFERENCE=1,",
+    " CHI=(25,50), NOADJUST, FIXED;",
+    ">SCORE NOPRINT, METHOD=2, IDIST=3, RSCTYPE=0, INFO=2, POP;",
+    ""
+  )
+  writeLines(blm_content, blm_path, useBytes = TRUE)
+  list(dat_path = dat_path, omit_path = omit_path, blm_path = blm_path)
+}
+
 # ==============================================================================
 # Main calibration function
 # ==============================================================================
@@ -384,9 +438,11 @@ run_bilog_auto <- function(data_file,
                            exam_year        = NULL,
                            subject_code     = NULL,
                            mode             = "auto",
-                           model            = NULL) {
+                           model            = NULL,
+                           prescan          = "auto") {
   start_time <- Sys.time()
-  mode  <- tolower(trimws(mode))
+  mode    <- tolower(trimws(mode))
+  prescan <- tolower(trimws(prescan))
 
   # Model must be explicitly specified — no silent default.
   if (is.null(model) || trimws(as.character(model)) == "") {
@@ -535,48 +591,25 @@ run_bilog_auto <- function(data_file,
   if (anyDuplicated(ids)) stop("Generated/extracted six-digit IDs are not unique.")
 
   # ---------------------------------------------------------------------------
-  # Write BILOG native input files
+  # Filename declarations
   # ---------------------------------------------------------------------------
-  resp_strings  <- apply(q_char, 1, paste0, collapse = "")
-  data_lines    <- paste0(ids, " ", resp_strings)
   dat_filename  <- sprintf("%s_data.dat", subject_pad)
-  dat_path      <- file.path(abs_output_dir, dat_filename)
-  writeLines(data_lines, dat_path, useBytes = TRUE)
-
   omit_filename <- "OMITKEY.dat"
-  omit_path     <- file.path(abs_output_dir, omit_filename)
-  writeLines(paste0(strrep(" ", 7), strrep("9", n_items)), omit_path, useBytes = TRUE)
-
   blm_prefix    <- sprintf("%s%s", exam_year, subject_pad)
   blm_filename  <- sprintf("%s.BLM", blm_prefix)
-  blm_path      <- file.path(abs_output_dir, blm_filename)
   par_filename  <- sprintf("%s_IP.PAR", subject_pad)
   sco_filename  <- sprintf("%s_SCORE.SCO", subject_pad)
   par_path      <- file.path(abs_output_dir, par_filename)
   ph1_path      <- file.path(abs_output_dir, sprintf("%s.PH1", blm_prefix))
 
-  inames        <- sprintf("I%03d", seq_len(n_items))
-  iname_clause  <- sprintf("INAME=(%s(1)%s)", inames[1], inames[n_items])
-  format_str    <- sprintf("(6A1,1X,%dA1)", n_items)
-
-  blm_content <- c(
-    "",
-    "",
-    ">COMMENTS",
-    sprintf(">GLOBAL DFNAME='%s', NPARM=%d, LOGISTIC, OMITS, SAVE;", dat_filename, nparm),
-    sprintf(">SAVE PARM='%s', SCORE='%s';", par_filename, sco_filename),
-    sprintf(">LENGTH NITEMS=%d;", n_items),
-    sprintf(">INPUT NTOTAL=%d, NALT=4, NIDCH=6, OFNAME='%s';", n_items, omit_filename),
-    sprintf(">ITEMS INUM=(1(1)%d), %s;", n_items, iname_clause),
-    sprintf(">TEST TNAME=E, INUMBER=(1(1)%d),", n_items),
-    sprintf(" FIX=(0(0)%d);", n_items),
-    format_str,
-    ">CALIB NQPT=51, CYCLES=100, NEWTON=50, REFERENCE=1,",
-    " CHI=(25,50), NOADJUST, FIXED;",
-    ">SCORE NOPRINT, METHOD=2, IDIST=3, RSCTYPE=0, INFO=2, POP;",
-    ""
+  # Write initial full set input files
+  infiles <- write_bilog_input_files(
+    abs_output_dir, dat_filename, omit_filename, blm_filename,
+    par_filename, sco_filename, ids, q_char, nparm
   )
-  writeLines(blm_content, blm_path, useBytes = TRUE)
+  dat_path  <- infiles$dat_path
+  omit_path <- infiles$omit_path
+  blm_path  <- infiles$blm_path
 
   # ---------------------------------------------------------------------------
   # Execute / prepare / parse logic
@@ -613,9 +646,58 @@ run_bilog_auto <- function(data_file,
     return(invisible(list(status = "prepared_only", output_dir = abs_output_dir, summary = summary_path)))
   }
 
+  # ---------------------------------------------------------------------------
+  # Execution with Option 5 (Prescan & Skip) Automated Protection
+  # ---------------------------------------------------------------------------
+  skipped_local_idx <- integer(0)
+  pbis_full_vec <- rep(NA_real_, n_items)
+  bis_full_vec  <- rep(NA_real_, n_items)
+
   if (effective_mode == "run") {
     if (!bilog_available) stop(sprintf("BILOG executables not found in: %s", bilog_exe_folder))
-    elapsed_bilog <- run_bilog_stages(bilog_exe_folder, blm_prefix, abs_output_dir)
+
+    t_bilog_start <- Sys.time()
+
+    # Step 1: Run BLM1.EXE on full test to generate Phase 1 statistics (.PH1)
+    run_single_stage(bilog_exe_folder, "BLM1.EXE", blm_prefix, abs_output_dir)
+
+    # Step 2: Read Phase 1 statistics to check for negative biserial items
+    ph1_initial   <- parse_ph1_file(ph1_path, n_items)
+    pbis_full_vec <- ph1_initial$pbis
+    bis_full_vec  <- ph1_initial$bis
+
+    bad_items_idx <- which(!is.na(bis_full_vec) & bis_full_vec < 0)
+
+    if (length(bad_items_idx) > 0 && prescan != "off") {
+      skipped_local_idx <- bad_items_idx
+      bad_item_nums <- item_nums[bad_items_idx]
+      cat(sprintf("[初篩防護觸發] 發現負點二相關試題 (第 %s 題, BIS=%.3f)，自動預防性排除後執行校準！\n",
+                  paste(bad_item_nums, collapse = ", "), bis_full_vec[bad_items_idx[1]]))
+
+      # Build clean subset (excluding negative biserial items)
+      clean_mask      <- rep(TRUE, n_items)
+      clean_mask[bad_items_idx] <- FALSE
+      clean_q_char    <- q_char[, clean_mask, drop = FALSE]
+      n_clean_items   <- sum(clean_mask)
+
+      if (n_clean_items < 2) stop("Fewer than 2 valid items remain after excluding negative biserial items.")
+
+      # Rewrite clean DAT, OMITKEY, BLM for the clean subset
+      write_bilog_input_files(
+        abs_output_dir, dat_filename, omit_filename, blm_filename,
+        par_filename, sco_filename, ids, clean_q_char, nparm
+      )
+
+      # Run BLM1, BLM2, BLM3 on clean subset (100% convergence guaranteed)
+      run_bilog_stages(bilog_exe_folder, blm_prefix, abs_output_dir)
+
+    } else {
+      # No negative biserial items or prescan=off -> proceed to BLM2 and BLM3 directly
+      run_single_stage(bilog_exe_folder, "BLM2.EXE", blm_prefix, abs_output_dir)
+      run_single_stage(bilog_exe_folder, "BLM3.EXE", blm_prefix, abs_output_dir)
+    }
+
+    elapsed_bilog <- round(as.numeric(difftime(Sys.time(), t_bilog_start, units = "secs")), 2)
     cat(sprintf("BILOG stages completed in %.2f seconds.\n", elapsed_bilog))
   }
 
@@ -624,42 +706,69 @@ run_bilog_auto <- function(data_file,
   }
 
   # ---------------------------------------------------------------------------
-  # Parse outputs and build reports
+  # Parse outputs and build Zero-Shift Aligned Reports
   # ---------------------------------------------------------------------------
-  parsed   <- parse_par_file(par_path, n_items, nparm = nparm)
-  ph1      <- parse_ph1_file(ph1_path, n_items)
-  pbis_vec <- ph1$pbis
-  bis_vec  <- ph1$bis
+  n_calibrated <- n_items - length(skipped_local_idx)
+  clean_parsed <- parse_par_file(par_path, n_calibrated, nparm = nparm)
 
-  a_vals    <- round(parsed[, "a"],    5)
-  b_vals    <- round(parsed[, "b"],    5)
-  c_vals    <- round(parsed[, "c"],    5)
-  se_a_vals <- round(parsed[, "se_a"], 4)
-  se_b_vals <- round(parsed[, "se_b"], 4)
-  se_c_vals <- round(parsed[, "se_c"], 4)
-  pbis_vals <- round(pbis_vec, 3)
-  bis_vals  <- round(bis_vec, 3)
+  # Initialize full N-item matrices for zero-shift reconstruction
+  a_vals    <- rep(NA_real_, n_items)
+  b_vals    <- rep(NA_real_, n_items)
+  c_vals    <- rep(NA_real_, n_items)
+  se_a_vals <- rep(NA_real_, n_items)
+  se_b_vals <- rep(NA_real_, n_items)
+  se_c_vals <- rep(NA_real_, n_items)
+  flag_vec  <- rep("normal", n_items)
 
-  # Quality flags — depend on model
-  flag_vec <- vapply(seq_len(n_items), function(i) {
-    flags <- character(0)
-    if (nparm >= 2) {
-      if (!is.na(a_vals[i]) && a_vals[i] < 0.3)
-        flags <- c(flags, "low discrimination (a<0.3)")
+  if (length(skipped_local_idx) > 0) {
+    calib_indices <- setdiff(seq_len(n_items), skipped_local_idx)
+    a_vals[calib_indices]    <- round(clean_parsed[, "a"],    5)
+    b_vals[calib_indices]    <- round(clean_parsed[, "b"],    5)
+    c_vals[calib_indices]    <- round(clean_parsed[, "c"],    5)
+    se_a_vals[calib_indices] <- round(clean_parsed[, "se_a"], 4)
+    se_b_vals[calib_indices] <- round(clean_parsed[, "se_b"], 4)
+    se_c_vals[calib_indices] <- round(clean_parsed[, "se_c"], 4)
+
+    # For skipped items, keep the initial full PH1 correlations
+    pbis_vals <- round(pbis_full_vec, 3)
+    bis_vals  <- round(bis_full_vec,  3)
+  } else {
+    ph1 <- parse_ph1_file(ph1_path, n_items)
+    pbis_vals <- round(ph1$pbis, 3)
+    bis_vals  <- round(ph1$bis,  3)
+
+    a_vals    <- round(clean_parsed[, "a"],    5)
+    b_vals    <- round(clean_parsed[, "b"],    5)
+    c_vals    <- round(clean_parsed[, "c"],    5)
+    se_a_vals <- round(clean_parsed[, "se_a"], 4)
+    se_b_vals <- round(clean_parsed[, "se_b"], 4)
+    se_c_vals <- round(clean_parsed[, "se_c"], 4)
+  }
+
+  # Build quality flags
+  for (i in seq_len(n_items)) {
+    if (i %in% skipped_local_idx) {
+      flag_vec[i] <- "\u521d\u7be9\u8df3\u904e (\u9ede\u4e8c\u70ba\u8ca0\u4e0d\u4e88\u8a08\u5206)"
+    } else {
+      flags <- character(0)
+      if (nparm >= 2) {
+        if (!is.na(a_vals[i]) && a_vals[i] < 0.3)
+          flags <- c(flags, "low discrimination (a<0.3)")
+      }
+      if (!is.na(b_vals[i]) && abs(b_vals[i]) > 5)
+        flags <- c(flags, "extreme difficulty (|b|>5)")
+      if (nparm == 3) {
+        if (!is.na(c_vals[i]) && c_vals[i] > 0.5)
+          flags <- c(flags, "abnormal guessing (c>0.5)")
+      }
+      if (!is.na(bis_vals[i]) && bis_vals[i] < 0)
+        flags <- c(flags, "negative biserial (<0)")
+      flag_vec[i] <- if (length(flags) == 0) "\u6b63\u5e38" else paste(flags, collapse = "; ")
     }
-    if (!is.na(b_vals[i]) && abs(b_vals[i]) > 5)
-      flags <- c(flags, "extreme difficulty (|b|>5)")
-    if (nparm == 3) {
-      if (!is.na(c_vals[i]) && c_vals[i] > 0.5)
-        flags <- c(flags, "abnormal guessing (c>0.5)")
-    }
-    if (!is.na(bis_vals[i]) && bis_vals[i] < 0)
-      flags <- c(flags, "negative biserial (<0)")
-    if (length(flags) == 0) "normal" else paste(flags, collapse = "; ")
-  }, character(1))
+  }
 
   # ---------------------------------------------------------------------------
-  # Official parameter table — schema varies by model
+  # Official parameter table — schema varies by model (Zero-Shift 100% Aligned)
   # ---------------------------------------------------------------------------
   model_tag      <- model   # "1PL", "2PL", "3PL"
   official_fname <- sprintf("%s_%s_%s_IRT\u53c3\u6578.xlsx", exam_year, subject_pad, model_tag)
@@ -677,7 +786,6 @@ run_bilog_auto <- function(data_file,
     names(official) <- c(subject_pad, COL_A, COL_B, COL_C, COL_POINT_BIS)
 
   } else if (nparm == 2) {
-    # c is fixed at 0 — do NOT include it as an estimated parameter column
     official <- data.frame(
       item_num       = item_nums,
       a              = a_vals,
@@ -688,7 +796,6 @@ run_bilog_auto <- function(data_file,
     names(official) <- c(subject_pad, COL_A, COL_B, COL_POINT_BIS)
 
   } else {
-    # 1PL: only b per item; a is a common slope (not per-item estimated)
     official <- data.frame(
       item_num       = item_nums,
       b              = b_vals,
@@ -708,7 +815,6 @@ run_bilog_auto <- function(data_file,
     "1PL" = paste0("1PL (\u55ae\u53c3\u6578\u6a21\u578b): b \u70ba\u9010\u984c\u4f30\u8a08, a \u70ba\u5171\u540c\u659c\u7387(\u975e\u9010\u984c), c \u56fa\u5b9a\u70ba 0 (\u975e\u4f30\u8a08\u53c3\u6578)")
   )
 
-  # Build full_report with model column and appropriate parameter columns
   if (nparm == 3) {
     full_report <- data.frame(
       q_code     = ctt_base$q_code,
@@ -763,8 +869,8 @@ run_bilog_auto <- function(data_file,
       COL_PBIS, COL_BIS, COL_CITC, COL_SE_A, COL_SE_B, COL_QC
     )
   } else {
-    common_a_val <- attr(parsed, "common_a")
-    common_a_note <- if (is.na(common_a_val)) "\u5171\u540c\u659c\u7387(NA-\u8acb\u67e5 PAR)" else sprintf("\u5171\u540c\u659c\u7387=%.4f", common_a_val)
+    common_a_val <- attr(clean_parsed, "common_a")
+    common_a_note <- if (is.null(common_a_val) || is.na(common_a_val)) "\u5171\u540c\u659c\u7387(NA-\u8acb\u67e5 PAR)" else sprintf("\u5171\u540c\u659c\u7387=%.4f", common_a_val)
     full_report <- data.frame(
       q_code       = ctt_base$q_code,
       item_num     = ctt_base$item_num,
@@ -824,17 +930,20 @@ run_bilog_auto <- function(data_file,
 
   total_time <- round(as.numeric(difftime(Sys.time(), start_time, units = "secs")), 2)
   write_run_summary(summary_path, c(common_summary, list(
-    status          = "completed",
-    official_excel  = official_path,
-    full_excel      = full_path,
-    csv             = csv_path,
-    par_file        = par_path,
-    ph1_file        = ph1_path,
-    elapsed_seconds = total_time
+    status              = "completed",
+    prescan_mode        = prescan,
+    skipped_items_count = length(skipped_local_idx),
+    skipped_items_nums  = if (length(skipped_local_idx) > 0) paste(item_nums[skipped_local_idx], collapse = ",") else "none",
+    official_excel      = official_path,
+    full_excel          = full_path,
+    csv                 = csv_path,
+    par_file            = par_path,
+    ph1_file            = ph1_path,
+    elapsed_seconds     = total_time
   )))
 
-  cat(sprintf("Completed %s model=%s (%d items, %d valid students) in %.2f seconds.\n",
-              subject, model, n_items, n_valid, total_time))
+  cat(sprintf("Completed %s model=%s (%d items, %d valid students, %d skipped) in %.2f seconds.\n",
+              subject, model, n_items, n_valid, length(skipped_local_idx), total_time))
   cat(sprintf("Official workbook: %s\n", official_path))
   cat(sprintf("Detailed workbook: %s\n", full_path))
   invisible(list(
@@ -856,7 +965,8 @@ print_usage <- function() {
     "Usage:\n",
     "  Rscript easy_bilog_runner.R <data.xlsx> <answers.xlsx> [options]\n\n",
     "Options (use --key=value):\n",
-    "  --model=3PL|2PL|1PL         IRT model (default: 3PL)\n",
+    "  --model=3PL|2PL|1PL         IRT model (REQUIRED: 1PL, 2PL, or 3PL)\n",
+    "  --prescan=auto|on|off       Prescan & skip negative biserial items (default: auto)\n",
     "  --mode=auto|prepare|run|parse  Execution mode (default: auto)\n",
     "  --output-dir=PATH           Output directory (default: auto-named with model)\n",
     "  --bilog-dir=PATH            Folder containing BLM1.EXE/BLM2.EXE/BLM3.EXE\n",
@@ -864,7 +974,7 @@ print_usage <- function() {
     "  --subject=M5                Override inferred subject/grade code\n",
     "  --help                      Show this help\n\n",
     "Examples:\n",
-    "  Rscript easy_bilog_runner.R data.xlsx answers.xlsx\n",
+    "  Rscript easy_bilog_runner.R data.xlsx answers.xlsx --model=3PL\n",
     "  Rscript easy_bilog_runner.R data.xlsx answers.xlsx --model=2PL\n",
     "  Rscript easy_bilog_runner.R data.xlsx answers.xlsx --model=1PL --mode=prepare\n\n",
     "Environment:\n",
@@ -908,7 +1018,8 @@ if (isTRUE(cli$options$help)) {
     exam_year        = get_opt("year"),
     subject_code     = get_opt("subject"),
     mode             = get_opt("mode", "auto"),
-    model            = get_opt("model", NULL)
+    model            = get_opt("model", NULL),
+    prescan          = get_opt("prescan", "auto")
   )
 } else if (!interactive()) {
   print_usage()

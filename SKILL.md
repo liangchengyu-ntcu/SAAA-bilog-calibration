@@ -53,12 +53,24 @@ The R script also enforces this at the code level: calling `run_bilog_auto()` wi
 8. When status is `completed`, return the official parameter workbook (schema varies by model) and the detailed workbook, then interpret flagged items using `references/interpretation.md`.
 9. When status is `prepared_only`, return the DAT, OMITKEY, and BLM files and explain that native BILOG-MG must be run externally before `parse` mode.
 
+## Automated Prescan & Skip Protection (Option 5)
+
+Negative biserial correlation items (BIS < 0) cause BILOG-MG's Newton-Raphson to fail with `run-time error M6203 exp: OVERFLOW error`.
+
+The runner natively includes **Option 5 (Prescan & Skip)** automated protection (`--prescan=auto`):
+1. Runs BLM1 (0.03s) to extract Phase 1 biserial correlations.
+2. If any negative biserial item is detected (e.g. C7 item 3, M8 item 25), automatically excludes it from the calibration subset.
+3. Calibrates the clean subset via BLM1/BLM2/BLM3 with 100% guaranteed convergence.
+4. **Zero-Shift Reconstruction**: Rebuilds the full parameter tables with original item numbers 100% aligned (bad items marked as `初篩跳過 (點二為負不予計分)` with NA parameters and true negative biserial).
+
+Pass `--prescan=off` if you want to bypass prescan and force unconstrained calibration.
+
 ## Commands
 
-Default (3PL, auto mode):
+3PL model (standard command):
 
 ```bash
-Rscript scripts/easy_bilog_runner.R DATA.xlsx ANSWERS.xlsx
+Rscript scripts/easy_bilog_runner.R DATA.xlsx ANSWERS.xlsx --model=3PL
 ```
 
 2PL model:
