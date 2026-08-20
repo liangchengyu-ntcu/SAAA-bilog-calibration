@@ -384,9 +384,20 @@ run_bilog_auto <- function(data_file,
                            exam_year        = NULL,
                            subject_code     = NULL,
                            mode             = "auto",
-                           model            = "3PL") {
+                           model            = NULL) {
   start_time <- Sys.time()
   mode  <- tolower(trimws(mode))
+
+  # Model must be explicitly specified — no silent default.
+  if (is.null(model) || trimws(as.character(model)) == "") {
+    stop(paste0(
+      "\u5c1a\u672a\u6307\u5b9a IRT \u6a21\u578b\u3002\n",
+      "\u8acb\u660e\u78ba\u50b3\u5165 model = \"1PL\"\\\"2PL\" \u6216 \"3PL\"\uff0c",
+      "\u6216\u5728\u547d\u4ee4\u5217\u4f7f\u7528 --model=1PL\\--model=2PL\\--model=3PL\u3002\n",
+      "\u6a21\u578b\u9078\u64c7\u662f\u5206\u6790\u6c7a\u7b56\uff0c\u4e0d\u61c9\u7531\u7cfb\u7d71\u9ed8\u9ed8\u66ff\u60a8\u6c7a\u5b9a\u3002"
+    ))
+  }
+
   model <- toupper(trimws(model))
   if (!(mode %in% c("auto", "prepare", "run", "parse"))) {
     stop("mode must be one of: auto, prepare, run, parse")
@@ -897,7 +908,7 @@ if (isTRUE(cli$options$help)) {
     exam_year        = get_opt("year"),
     subject_code     = get_opt("subject"),
     mode             = get_opt("mode", "auto"),
-    model            = get_opt("model", "3PL")
+    model            = get_opt("model", NULL)
   )
 } else if (!interactive()) {
   print_usage()

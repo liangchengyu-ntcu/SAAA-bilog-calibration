@@ -17,9 +17,19 @@ Use `scripts/easy_bilog_runner.R` as the only calibration engine. Treat its beha
 - If BILOG-MG is unavailable, use `prepare` mode and return the native files for external execution.
 - Use the same response and answer workbooks plus the same output directory when later parsing external BILOG results.
 
-## Model selection
+## Model selection — Agent must ask before calibrating
 
-Pass `--model=3PL|2PL|1PL` to select the IRT model. Default is `3PL`.
+**Model selection is an analytical decision. The Agent must never silently default to any model.**
+
+Follow this decision logic strictly:
+
+| User says | Agent action |
+| :--- | :--- |
+| Explicitly says `1PL`, `2PL`, or `3PL` | Execute immediately with the specified model |
+| Says "compare models" or "which model fits" | Run all three (1PL → 2PL → 3PL), then compare and report |
+| Says "run BILOG" or any calibration request **without specifying a model** | **Stop. Ask: "這次要跑 1PL、2PL 還是 3PL？" Before the user answers, do NOT start calibration and do NOT assume 3PL.** |
+
+The R script also enforces this at the code level: calling `run_bilog_auto()` without `--model` raises an error (`尚未指定 IRT 模型`). This is the second layer of protection in case the Agent forgets to ask.
 
 | Model | NPARM | Estimated parameters | Fixed parameters | Official table columns |
 | :--- | :---: | :--- | :--- | :--- |
