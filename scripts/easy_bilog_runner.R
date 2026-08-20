@@ -526,12 +526,13 @@ run_bilog_auto <- function(data_file,
   b_vals <- round(parsed[, "b"], 5)
   c_vals <- round(parsed[, "c"], 5)
   pbis_vals <- round(pbis_vec, 3)
+  bis_vals  <- round(bis_vec, 3)
 
   flag_vec <- vapply(seq_len(n_items), function(i) {
     flags <- character(0)
     if (!is.na(a_vals[i]) && a_vals[i] < 0.3) flags <- c(flags, "low discrimination (a<0.3)")
     if (!is.na(b_vals[i]) && abs(b_vals[i]) > 5) flags <- c(flags, "extreme difficulty (|b|>5)")
-    if (!is.na(pbis_vals[i]) && pbis_vals[i] < 0) flags <- c(flags, "negative point-biserial (<0)")
+    if (!is.na(bis_vals[i]) && bis_vals[i] < 0) flags <- c(flags, "negative biserial (<0)")
     if (length(flags) == 0) "normal" else paste(flags, collapse = "; ")
   }, character(1))
 
@@ -540,7 +541,7 @@ run_bilog_auto <- function(data_file,
     a = a_vals,
     b = b_vals,
     c = c_vals,
-    point_biserial = pbis_vals,
+    point_biserial = bis_vals,
     check.names = FALSE
   )
   names(official) <- c(subject_pad, COL_A, COL_B, COL_C, COL_POINT_BIS)

@@ -83,8 +83,8 @@ Important invariants:
 - Exclude blank answers and `不予計分` items from calibration.
 - Preserve original item numbers in all reports after exclusions.
 - Require response columns named `Q<original item number>` for every scorable item.
-- Keep the official IRT workbook at exactly five columns.
-- Use PH1 `PEARSON` as PBIS/point-biserial; keep `BISERIAL` as a separate BIS diagnostic.
+- Keep the official IRT workbook at exactly five columns: item number, a, b, c, BIS (from PH1 BISERIAL to match historical official practice).
+- The 16-column detailed workbook provides both PBIS (PEARSON) and BIS (BISERIAL) diagnostics.
 
 ## Result interpretation
 
