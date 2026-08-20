@@ -1,0 +1,45 @@
+# BILOG-MG Calibration Outputs
+*.dat
+*.BLM
+OMITKEY.dat
+*.PAR
+*.PH1
+*.PH2
+*.PH3
+*.SCO
+*.LOG
+BILOG_RUN_SUMMARY.txt
+preflight.json
+
+# Output directories
+*_BILOG_Results/
+*_mirt_Results/
+TEST_*/
+
+# R temp files
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Generated Excel reports (keep examples, ignore run outputs)
+*_IRT參數.xlsx
+*_3PL_試題參數總表.xlsx
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor temp
+*.swp
+*.swo
+*~

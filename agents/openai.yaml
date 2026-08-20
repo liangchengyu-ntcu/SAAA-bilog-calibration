@@ -1,0 +1,10 @@
+interface:
+  display_name: BILOG-MG Calibration
+  short_description: R-first BILOG-MG 3PL calibration, parsing, QC, and reporting
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

@@ -1,0 +1,53 @@
+name: CI – Preflight and Prepare
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    name: "R Preflight & Prepare (Ubuntu)"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "4.4"
+
+      - name: Install R packages
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            readxl
+            writexl
+
+      - name: Run in prepare mode (sample data)
+        run: |
+          Rscript scripts/easy_bilog_runner.R \
+            examples/sample_data.xlsx \
+            examples/sample_answers.xlsx \
+            --subject=M5 \
+            --year=115 \
+            --mode=prepare \
+            --output-dir=ci_test_output
+
+      - name: Verify output files exist
+        run: |
+          echo "=== Output directory contents ==="
+          ls -la ci_test_output/
+          test -f ci_test_output/BILOG_RUN_SUMMARY.txt && echo "✅ BILOG_RUN_SUMMARY.txt found" || (echo "❌ Missing BILOG_RUN_SUMMARY.txt" && exit 1)
+          test -f ci_test_output/*.dat 2>/dev/null && echo "✅ .dat file found" || echo "ℹ️  .dat file check skipped"
+
+      - name: Print summary
+        if: always()
+        run: |
+          if [ -f ci_test_output/BILOG_RUN_SUMMARY.txt ]; then
+            echo "=== BILOG_RUN_SUMMARY.txt ==="
+            cat ci_test_output/BILOG_RUN_SUMMARY.txt
+          fi
